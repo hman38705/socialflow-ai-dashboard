@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { ViewProps } from '../types';
+import { NotificationPreferences } from './NotificationPreferences';
 
 export const Settings: React.FC<ViewProps> = () => {
   // State for toggles (all enabled by default)
@@ -7,6 +8,7 @@ export const Settings: React.FC<ViewProps> = () => {
   const [emailNotifications, setEmailNotifications] = useState(true);
   const [publicProfile, setPublicProfile] = useState(true);
   const [autoUpdate, setAutoUpdate] = useState(true);
+  const [showNotificationPreferences, setShowNotificationPreferences] = useState(false);
 
   const Toggle = ({ label, checked, onChange }: { label: string; checked: boolean; onChange: (val: boolean) => void }) => (
     <div className="flex justify-between items-center bg-[#1A1D1F] p-4 rounded-lg">
@@ -44,7 +46,9 @@ export const Settings: React.FC<ViewProps> = () => {
               <span>Profile Settings</span>
               <span className="material-symbols-outlined">arrow_forward_ios</span>
             </button>
-            <button className="w-full text-left bg-[#1A1D1F] hover:bg-[#2A2D2F] text-white py-3 px-4 rounded-lg flex justify-between items-center transition-colors">
+            <button 
+              onClick={() => setShowNotificationPreferences(true)}
+              className="w-full text-left bg-[#1A1D1F] hover:bg-[#2A2D2F] text-white py-3 px-4 rounded-lg flex justify-between items-center transition-colors">
               <span>Notification Preferences</span>
               <span className="material-symbols-outlined">arrow_forward_ios</span>
             </button>
@@ -63,6 +67,12 @@ export const Settings: React.FC<ViewProps> = () => {
           </div>
         </div>
       </div>
+
+      {showNotificationPreferences && (
+        <NotificationPreferences 
+          onClose={() => setShowNotificationPreferences(false)}
+        />
+      )}
     </div>
   );
 };
