@@ -40,13 +40,12 @@ export class FreighterProvider implements WalletProvider {
   };
 
   private connectedPublicKey: string | null = null;
-  private currentNetwork: NetworkType = 'TESTNET';
 
   isInstalled(): boolean {
     return typeof window !== 'undefined' && typeof window.freighter !== 'undefined';
   }
 
-  async connect(network: NetworkType): Promise<string> {
+  async connect(_network: NetworkType): Promise<string> {
     if (!this.isInstalled()) {
       throw new WalletException(
         WalletError.NOT_INSTALLED,
@@ -65,7 +64,6 @@ export class FreighterProvider implements WalletProvider {
       }
 
       this.connectedPublicKey = publicKey;
-      this.currentNetwork = network;
       
       return publicKey;
     } catch (error) {
@@ -92,7 +90,6 @@ export class FreighterProvider implements WalletProvider {
 
   async disconnect(): Promise<void> {
     this.connectedPublicKey = null;
-    this.currentNetwork = 'TESTNET';
   }
 
   getPublicKey(): string | null {

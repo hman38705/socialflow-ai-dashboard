@@ -54,14 +54,13 @@ export class AlbedoProvider implements WalletProvider {
   };
 
   private connectedPublicKey: string | null = null;
-  private currentNetwork: NetworkType = 'TESTNET';
 
   isInstalled(): boolean {
     // Albedo is loaded via CDN, check if it's available
     return typeof window !== 'undefined' && typeof window.albedo !== 'undefined';
   }
 
-  async connect(network: NetworkType): Promise<string> {
+  async connect(_network: NetworkType): Promise<string> {
     if (!this.isInstalled()) {
       // Try to load Albedo dynamically
       await this.loadAlbedo();
@@ -88,7 +87,6 @@ export class AlbedoProvider implements WalletProvider {
       }
 
       this.connectedPublicKey = response.pubkey;
-      this.currentNetwork = network;
       
       return response.pubkey;
     } catch (error) {
@@ -118,7 +116,6 @@ export class AlbedoProvider implements WalletProvider {
 
   async disconnect(): Promise<void> {
     this.connectedPublicKey = null;
-    this.currentNetwork = 'TESTNET';
   }
 
   getPublicKey(): string | null {
@@ -176,7 +173,7 @@ export class AlbedoProvider implements WalletProvider {
     }
   }
 
-  async signAuthEntry(entry: string, network: NetworkType): Promise<SignAuthEntryResult> {
+  async signAuthEntry(entry: string, _network: NetworkType): Promise<SignAuthEntryResult> {
     if (!this.isInstalled()) {
       throw new WalletException(
         WalletError.NOT_INSTALLED,

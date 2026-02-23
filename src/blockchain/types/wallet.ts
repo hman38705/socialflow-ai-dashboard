@@ -11,6 +11,13 @@ export interface WalletProviderMetadata {
   description: string;
 }
 
+export enum WalletConnectionStatus {
+  DISCONNECTED = 'DISCONNECTED',
+  CONNECTING = 'CONNECTING',
+  CONNECTED = 'CONNECTED',
+  ERROR = 'ERROR'
+}
+
 export interface WalletConnection {
   publicKey: string;
   provider: string;

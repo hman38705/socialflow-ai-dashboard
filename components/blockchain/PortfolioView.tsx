@@ -4,8 +4,8 @@ import {
   Tooltip, ResponsiveContainer, Legend 
 } from 'recharts';
 import { 
-  RefreshCw, Plus, Trash2, Search, Filter, ChevronDown,
-  Wallet, TrendingUp, DollarSign, Search as SearchIcon
+  RefreshCw, Plus, Trash2, Filter, ChevronDown,
+  Wallet, TrendingUp, Search as SearchIcon
 } from 'lucide-react';
 import { Card } from '../ui/Card';
 import stellarService, { Asset } from '../../services/stellarService';
@@ -19,7 +19,6 @@ import {
   BlockchainAsset 
 } from '../../types';
 
-const COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
 
 const CHART_COLORS = ['#3B82F6', '#10B981', '#F59E0B', '#EF4444', '#8B5CF6', '#EC4899', '#06B6D4', '#84CC16'];
 
@@ -544,7 +543,7 @@ export const PortfolioView: React.FC = () => {
             </div>
 
             {/* Asset Rows */}
-            {filteredAssets.map((asset, index) => (
+            {filteredAssets.map((asset, _index) => (
               <div
                 key={`${asset.code}-${asset.issuer}`}
                 className="grid grid-cols-12 gap-4 px-4 py-3 bg-gray-800/50 hover:bg-gray-800 rounded-lg items-center transition-colors"

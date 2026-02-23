@@ -5,7 +5,8 @@ export enum View {
   CREATE_POST = 'CREATE_POST',
   MEDIA_LIBRARY = 'MEDIA_LIBRARY',
   INBOX = 'INBOX',
-  SETTINGS = 'SETTINGS'
+  SETTINGS = 'SETTINGS',
+  PORTFOLIO = 'PORTFOLIO'
 }
 
 export interface NavItem {
@@ -60,16 +61,7 @@ export enum Platform {
   X = 'x'
 }
 
-export enum View {
-  DASHBOARD = 'DASHBOARD',
-  ANALYTICS = 'ANALYTICS',
-  CALENDAR = 'CALENDAR',
-  CREATE_POST = 'CREATE_POST',
-  MEDIA_LIBRARY = 'MEDIA_LIBRARY',
-  INBOX = 'INBOX',
-  SETTINGS = 'SETTINGS',
-  PORTFOLIO = 'PORTFOLIO'
-}
+// consolidated View enum defined above, duplicate removed
 
 export interface BlockchainAsset {
   code: string;
@@ -90,3 +82,14 @@ export interface PortfolioSummary {
 export type AssetFilter = 'all' | 'tokens' | 'nfts' | 'zero_balance';
 export type AssetSort = 'name' | 'balance' | 'value';
 export type SortDirection = 'asc' | 'desc';
+
+export interface WalletState {
+  isConnected: boolean;
+  publicKey: string | null;
+  provider: string | null;
+  network: 'mainnet' | 'testnet' | 'custom';
+  xlmBalance: string | null;
+  tokenBalances: { code: string; issuer: string; balance: string }[];
+  isLoading: boolean;
+  error: string | null;
+}

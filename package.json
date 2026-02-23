@@ -5,14 +5,12 @@
   "main": "electron/main.js",
   "scripts": {
     "dev": "npx vite",
-    "test": "vitest",
+    "test": "jest",
     "build": "tsc && npx vite build",
     "preview": "npx vite preview",
-    "test": "vitest",
     "test:run": "vitest run",
     "electron:dev": "concurrently \"npm run dev\" \"npx wait-on tcp:5173 && npx electron .\"",
     "electron:build": "npx vite build && electron-builder",
-    "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },
@@ -21,22 +19,27 @@
   "license": "ISC",
   "dependencies": {
     "@google/genai": "latest",
-    "@stellar/stellar-sdk": "^14.5.0",
+    "@stellar/stellar-sdk": "^13.3.0",
     "axios": "^1.13.5",
     "lucide-react": "^0.300.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",
     "react-icons": "^5.5.0",
-    "recharts": "^2.10.0",
-    "@stellar/stellar-sdk": "^13.3.0"
+    "recharts": "^2.10.0"
   },
   "devDependencies": {
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
     "@types/jest": "^29.5.11",
     "@types/react": "^18.2.43",
     "@types/react-dom": "^18.2.17",
+    "@types/testing-library__react": "^10.0.1",
     "@vitejs/plugin-react": "^4.2.1",
     "autoprefixer": "^10.4.16",
     "concurrently": "^8.2.2",
+    "electron": "^28.0.0",
+    "electron-builder": "^24.9.1",
     "fake-indexeddb": "^3.1.7",
     "jsdom": "^28.1.0",
     "postcss": "^8.4.32",
@@ -45,8 +48,6 @@
     "typescript": "^5.3.3",
     "vite": "^5.0.8",
     "vitest": "^1.1.4",
-    "electron": "^28.0.0",
-    "electron-builder": "^24.9.1",
     "wait-on": "^7.2.0"
   },
   "build": {

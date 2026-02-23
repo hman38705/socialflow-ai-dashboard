@@ -18,7 +18,6 @@ import { AlbedoProvider } from './providers/AlbedoProvider';
 
 const SESSION_STORAGE_KEY = 'socialflow_wallet_session';
 const SESSION_TIMEOUT_MS = 30 * 60 * 1000; // 30 minutes
-const ENCRYPTION_KEY = 'socialflow_wallet_encryption_v1'; // In production, use proper key management
 
 export class WalletService {
   private providers: Map<string, WalletProvider> = new Map();

@@ -20,7 +20,7 @@ export const AddTrustlineModal: React.FC<AddTrustlineModalProps> = ({
   const [assetIssuer, setAssetIssuer] = useState('');
   const [loading, setLoading] = useState(false);
   const [validationError, setValidationError] = useState<string | null>(null);
-  const [estimatedFee, setEstimatedFee] = useState<string>('0.00001');
+  const [estimatedFee, _setEstimatedFee] = useState<string>('0.00001');
 
   // Validate asset input
   const validateAsset = useCallback(() => {

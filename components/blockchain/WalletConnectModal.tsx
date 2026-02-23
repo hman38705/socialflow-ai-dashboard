@@ -1,6 +1,16 @@
 import React, { useState } from 'react';
-import { WalletProvider, WalletConnectionStatus } from '../../types';
+import { WalletConnectionStatus } from '../../src/blockchain/types/wallet';
 import { connectWallet, setError } from '../../store/blockchainSlice';
+
+// Local interface matching structure used in modal
+interface LocalProvider {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  installed: boolean;
+  installUrl?: string;
+}
 
 const MaterialIcon = ({ name, className }: { name: string, className?: string }) => (
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
@@ -11,7 +21,7 @@ interface WalletConnectModalProps {
   onClose: () => void;
 }
 
-const WALLET_PROVIDERS: WalletProvider[] = [
+const WALLET_PROVIDERS: LocalProvider[] = [
   {
     id: 'freighter',
     name: 'Freighter',
@@ -55,7 +65,7 @@ export const WalletConnectModal: React.FC<WalletConnectModalProps> = ({ isOpen, 
 
   if (!isOpen) return null;
 
-  const handleConnect = async (provider: WalletProvider) => {
+  const handleConnect = async (provider: LocalProvider) => {
     if (!provider.installed) return;
 
     setSelectedProvider(provider.id);

@@ -4,7 +4,7 @@
  */
 
 // Types
-export {
+export type {
   NetworkType,
   WalletProvider,
   WalletProviderMetadata,

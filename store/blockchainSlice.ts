@@ -1,4 +1,4 @@
-import { WalletState, TokenBalance } from '../types';
+import { WalletState } from '../types';
 
 // Simple state management without Redux dependency
 let walletState: WalletState = {
