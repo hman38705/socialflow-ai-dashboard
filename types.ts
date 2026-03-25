@@ -59,3 +59,31 @@ export enum Platform {
   LINKEDIN = 'linkedin',
   X = 'x'
 }
+
+// Webhook types for secret rotation support
+export interface WebhookConfig {
+  id: string;
+  url: string;
+  secret: string;
+  oldSecret?: string;
+  isActive: boolean;
+  createdAt: Date;
+  updatedAt: Date;
+  rotationInProgress: boolean;
+  rotationStartedAt?: Date;
+}
+
+export interface WebhookEvent {
+  id: string;
+  type: string;
+  timestamp: Date;
+  payload: Record<string, unknown>;
+  signature: string;
+  verified: boolean;
+}
+
+export interface WebhookSignatureResult {
+  valid: boolean;
+  secretUsed: 'current' | 'old' | null;
+  error?: string;
+}
