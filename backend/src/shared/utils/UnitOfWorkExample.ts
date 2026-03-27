@@ -1,149 +1,88 @@
+/**
+ * Usage examples for UnitOfWork and @Transactional.
+ * These are illustrative — not production code.
+ */
 import { PrismaClient } from '@prisma/client';
-import { UnitOfWork } from './UnitOfWork';
-import { UserRepository, OrganizationRepository, SubscriptionRepository } from './BaseRepository';
-import { createLogger } from '../lib/logger';
+import { UnitOfWork, TransactionClient } from './UnitOfWork';
+import { Transactional } from './Transactional';
 
-const logger = createLogger('unitOfWorkExample');
-
-/**
- * Example: Using Unit of Work for atomic multi-repository operations
- */
-
-export async function exampleCreateUserWithOrganization(
+// ---------------------------------------------------------------------------
+// 1. UnitOfWork.execute — callback style
+// ---------------------------------------------------------------------------
+export async function createUserWithOrganization(
   prisma: PrismaClient,
   userData: any,
   orgData: any,
 ) {
-  const unitOfWork = new UnitOfWork(prisma);
+  const uow = new UnitOfWork(prisma);
 
-  try {
-    const result = await unitOfWork.execute(async (context) => {
-      const userRepo = new UserRepository(context.prisma);
-      const orgRepo = new OrganizationRepository(context.prisma);
-
-      // Create organization first
-      const organization = await orgRepo.create(orgData);
-      logger.info('Organization created', { orgId: organization.id });
-
-      // Create user linked to organization
-      const user = await userRepo.create({
-        ...userData,
-        organizationId: organization.id,
-      });
-      logger.info('User created', { userId: user.id });
-
-      return { user, organization };
-    });
-
-    logger.info('Transaction completed successfully', { result });
-    return result;
-  } catch (error) {
-    logger.error('Transaction failed - all changes rolled back', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
+  return uow.execute(async ({ prisma: tx }) => {
+    const org  = await tx.organization.create({ data: orgData });
+    const user = await tx.user.create({ data: { ...userData, organizationId: org.id } });
+    return { user, org };
+  });
 }
 
-/**
- * Example: Complex transaction with subscription creation
- */
-export async function exampleCreateUserWithSubscription(
-  prisma: PrismaClient,
-  userData: any,
-  orgData: any,
-  subscriptionData: any,
-) {
-  const unitOfWork = new UnitOfWork(prisma);
+// ---------------------------------------------------------------------------
+// 2. UnitOfWork.executeSequential — ordered, dependent operations
+// ---------------------------------------------------------------------------
+export async function provisionAccount(prisma: PrismaClient, userData: any, subData: any) {
+  const uow = new UnitOfWork(prisma);
 
-  try {
-    const result = await unitOfWork.execute(async (context) => {
-      const userRepo = new UserRepository(context.prisma);
-      const orgRepo = new OrganizationRepository(context.prisma);
-      const subRepo = new SubscriptionRepository(context.prisma);
-
-      // Step 1: Create organization
-      const organization = await orgRepo.create(orgData);
-
-      // Step 2: Create user
-      const user = await userRepo.create({
-        ...userData,
-        organizationId: organization.id,
-      });
-
-      // Step 3: Create subscription
-      const subscription = await subRepo.create({
-        ...subscriptionData,
-        userId: user.id,
-        organizationId: organization.id,
-      });
-
-      return { user, organization, subscription };
-    });
-
-    logger.info('Complex transaction completed', { result });
-    return result;
-  } catch (error) {
-    logger.error('Complex transaction failed - all changes rolled back', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
+  return uow.executeSequential([
+    (tx) => tx.user.create({ data: userData }),
+    async (tx) => {
+      const user = await tx.user.findFirstOrThrow({ where: { email: userData.email } });
+      return tx.subscription.create({ data: { ...subData, userId: user.id } });
+    },
+  ]);
 }
 
-/**
- * Example: Update multiple entities atomically
- */
-export async function exampleUpdateUserAndOrganization(
+// ---------------------------------------------------------------------------
+// 3. UnitOfWork.executeParallel — independent operations
+// ---------------------------------------------------------------------------
+export async function updateUserAndOrg(
   prisma: PrismaClient,
   userId: string,
   orgId: string,
   userData: any,
   orgData: any,
 ) {
-  const unitOfWork = new UnitOfWork(prisma);
+  const uow = new UnitOfWork(prisma);
 
-  try {
-    const result = await unitOfWork.execute(async (context) => {
-      const userRepo = new UserRepository(context.prisma);
-      const orgRepo = new OrganizationRepository(context.prisma);
-
-      // Update both entities atomically
-      const [user, organization] = await Promise.all([
-        userRepo.update(userId, userData),
-        orgRepo.update(orgId, orgData),
-      ]);
-
-      return { user, organization };
-    });
-
-    logger.info('Update transaction completed', { result });
-    return result;
-  } catch (error) {
-    logger.error('Update transaction failed - all changes rolled back', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  }
+  return uow.executeParallel([
+    (tx) => tx.user.update({ where: { id: userId }, data: userData }),
+    (tx) => tx.organization.update({ where: { id: orgId }, data: orgData }),
+  ]);
 }
 
-/**
- * Example: Using executeMultiple for independent operations
- */
-export async function exampleMultipleOperations(
-  prisma: PrismaClient,
-  operations: Array<(tx: PrismaClient) => Promise<any>>,
-) {
-  const unitOfWork = new UnitOfWork(prisma);
+// ---------------------------------------------------------------------------
+// 4. @Transactional decorator — service-layer style
+//    The decorator starts a transaction and injects `tx` as the last arg.
+//    Pass an existing `tx` to propagate into an outer transaction.
+// ---------------------------------------------------------------------------
+export class UserService {
+  constructor(private readonly prisma: PrismaClient) {}
 
-  try {
-    const results = await unitOfWork.executeMultiple(operations);
-    logger.info('Multiple operations completed', { count: results.length });
-    return results;
-  } catch (error) {
-    logger.error('Multiple operations failed - all changes rolled back', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
+  @Transactional({ timeout: 10_000 })
+  async createWithSubscription(userData: any, subData: any, tx?: TransactionClient) {
+    const client = tx ?? this.prisma; // tx is always set by the decorator
+    const user = await client.user.create({ data: userData });
+    await client.subscription.create({ data: { ...subData, userId: user.id } });
+    return user;
+  }
+
+  // Calls the decorated method above — passes its own tx for propagation.
+  @Transactional()
+  async createWithOrgAndSubscription(
+    userData: any,
+    orgData: any,
+    subData: any,
+    tx?: TransactionClient,
+  ) {
+    const client = tx ?? this.prisma;
+    const org = await client.organization.create({ data: orgData });
+    // Propagates the outer tx into createWithSubscription
+    return this.createWithSubscription({ ...userData, organizationId: org.id }, subData, tx);
   }
 }

@@ -1,87 +1,99 @@
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient, Prisma } from '@prisma/client';
 import { createLogger } from '../lib/logger';
 
 const logger = createLogger('unitOfWork');
 
-/**
- * Repository interface for Unit of Work pattern
- */
+/** Prisma interactive-transaction client type */
+export type TransactionClient = Omit<
+  PrismaClient,
+  '$connect' | '$disconnect' | '$on' | '$transaction' | '$use' | '$extends'
+>;
+
+export interface TransactionOptions {
+  /** Max time (ms) Prisma waits to acquire a connection. Default: 2000 */
+  maxWait?: number;
+  /** Max time (ms) the transaction may run before being aborted. Default: 5000 */
+  timeout?: number;
+  isolationLevel?: Prisma.TransactionIsolationLevel;
+}
+
 export interface IRepository {
   [key: string]: any;
 }
 
-/**
- * Unit of Work context containing transaction-scoped repositories
- */
 export interface IUnitOfWorkContext {
-  prisma: PrismaClient;
+  prisma: TransactionClient;
   repositories: IRepository;
 }
 
-/**
- * Unit of Work callback function
- */
 export type UnitOfWorkCallback<T> = (context: IUnitOfWorkContext) => Promise<T>;
 
 /**
- * Unit of Work Pattern Implementation
- * Manages atomic transactions across multiple repositories
+ * Wraps Prisma interactive transactions with a clean service-layer API.
+ *
+ * Usage:
+ *   const uow = new UnitOfWork(prisma);
+ *   const result = await uow.execute(async ({ prisma: tx }) => {
+ *     const user = await tx.user.create({ data: userData });
+ *     await tx.subscription.create({ data: { userId: user.id, ...subData } });
+ *     return user;
+ *   });
  */
 export class UnitOfWork {
-  constructor(private prisma: PrismaClient) {}
+  constructor(private readonly prisma: PrismaClient) {}
 
   /**
-   * Execute a callback within a transaction context
-   * All database operations are atomic - either all succeed or all rollback
+   * Run `callback` inside a single Prisma interactive transaction.
+   * Rolls back automatically on any thrown error.
    */
-  async execute<T>(callback: UnitOfWorkCallback<T>, repositories?: IRepository): Promise<T> {
-    try {
-      logger.debug('Starting Unit of Work transaction');
-
-      const result = await this.prisma.$transaction(async (tx) => {
-        const context: IUnitOfWorkContext = {
-          prisma: tx as PrismaClient,
-          repositories: repositories || {},
-        };
-
-        return await callback(context);
-      });
-
-      logger.debug('Unit of Work transaction committed');
-      return result;
-    } catch (error) {
-      logger.error('Unit of Work transaction failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+  async execute<T>(
+    callback: UnitOfWorkCallback<T>,
+    options?: TransactionOptions,
+    repositories?: IRepository,
+  ): Promise<T> {
+    logger.debug('Starting Unit of Work transaction');
+    const result = await this.prisma.$transaction(async (tx) => {
+      return callback({ prisma: tx, repositories: repositories ?? {} });
+    }, options);
+    logger.debug('Unit of Work transaction committed');
+    return result;
   }
 
   /**
-   * Execute multiple operations in a single transaction
+   * Run an array of operations sequentially inside one transaction.
+   * Each operation receives the same transaction client so later steps
+   * can depend on results from earlier ones.
    */
-  async executeMultiple<T>(operations: Array<(tx: PrismaClient) => Promise<T>>): Promise<T[]> {
-    try {
-      logger.debug('Starting multi-operation Unit of Work transaction');
-
-      const results = await this.prisma.$transaction(async (tx) => {
-        return Promise.all(operations.map((op) => op(tx as PrismaClient)));
-      });
-
-      logger.debug('Multi-operation Unit of Work transaction committed');
+  async executeSequential<T>(
+    operations: Array<(tx: TransactionClient) => Promise<T>>,
+    options?: TransactionOptions,
+  ): Promise<T[]> {
+    logger.debug('Starting sequential Unit of Work transaction');
+    return this.prisma.$transaction(async (tx) => {
+      const results: T[] = [];
+      for (const op of operations) {
+        results.push(await op(tx));
+      }
       return results;
-    } catch (error) {
-      logger.error('Multi-operation Unit of Work transaction failed', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-      throw error;
-    }
+    }, options);
+  }
+
+  /**
+   * Run an array of independent operations in parallel inside one transaction.
+   * Use `executeSequential` when operations depend on each other.
+   */
+  async executeParallel<T>(
+    operations: Array<(tx: TransactionClient) => Promise<T>>,
+    options?: TransactionOptions,
+  ): Promise<T[]> {
+    logger.debug('Starting parallel Unit of Work transaction');
+    return this.prisma.$transaction(
+      (tx) => Promise.all(operations.map((op) => op(tx))),
+      options,
+    );
   }
 }
 
-/**
- * Factory function to create Unit of Work instance
- */
 export function createUnitOfWork(prisma: PrismaClient): UnitOfWork {
   return new UnitOfWork(prisma);
 }
