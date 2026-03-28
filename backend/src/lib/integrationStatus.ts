@@ -3,11 +3,14 @@
  *
  * Checks which optional integrations are configured at startup.
  * - Emits a one-time `warn` log for every disabled integration.
+ * - Emits a structured startup summary (info) listing enabled/disabled components.
+ * - Sets the `app_degraded_capabilities` Prometheus gauge for each component.
  * - Exposes a readiness snapshot consumed by GET /health/readiness.
  * - Throws if REQUIRE_INTEGRATIONS lists an integration that is disabled.
  */
 import { config } from '../config/config';
 import { createLogger } from './logger';
+import { degradedCapabilities } from './metrics';
 
 const logger = createLogger('integration-status');
 
@@ -69,6 +72,20 @@ const INTEGRATIONS: Array<{ name: string; check: () => boolean; reason: string }
     check: () => Boolean(config.ELASTICSEARCH_URL),
     reason: 'ELASTICSEARCH_URL not set — log shipping to Elasticsearch disabled',
   },
+  {
+    name: 'rate-limit-redis',
+    // Evaluated lazily after initRateLimiters() resolves; we import the flag here.
+    // In non-production envs the memory store is intentional, so we only flag it
+    // as degraded when NODE_ENV === 'production'.
+    check: () => {
+      if (config.NODE_ENV !== 'production') return true;
+      // Avoid a circular import by reading the flag via require at call time.
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      return require('../middleware/rateLimit').rateLimitRedisEnabled === true;
+    },
+    reason:
+      'rate-limit-redis unavailable in production — rate limits are not shared across instances',
+  },
 ];
 
 let _snapshot: IntegrationState[] | null = null;
@@ -92,10 +109,26 @@ export function checkIntegrations(): IntegrationState[] {
     if (!enabled) {
       logger.warn(`Integration disabled: ${name}`, { reason });
     }
+    // Update Prometheus gauge
+    degradedCapabilities.labels(name).set(enabled ? 0 : 1);
     return { name, enabled, reason: enabled ? undefined : reason };
   });
 
   _snapshot = states;
+
+  // Emit structured startup summary
+  const enabled = states.filter((s) => s.enabled).map((s) => s.name);
+  const disabled = states.filter((s) => !s.enabled).map((s) => s.name);
+  logger.info('Optional component startup summary', {
+    enabled,
+    disabled,
+    degradedCount: disabled.length,
+  });
+  if (disabled.length > 0) {
+    logger.warn(
+      `${disabled.length} optional component(s) are DISABLED — some production features will not work: ${disabled.join(', ')}`,
+    );
+  }
 
   const missing = states.filter((s) => !s.enabled && required.has(s.name));
   if (missing.length > 0) {

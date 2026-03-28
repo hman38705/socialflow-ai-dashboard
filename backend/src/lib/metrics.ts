@@ -45,6 +45,18 @@ export const sliBreachTotal = new Counter({
 });
 
 /**
+ * Tracks degraded optional capabilities.
+ * Label `capability` matches the integration/component name.
+ * Value 1 = degraded (disabled/missing), 0 = fully operational.
+ */
+export const degradedCapabilities = new Gauge({
+  name: 'app_degraded_capabilities',
+  help: 'Optional capabilities running in degraded mode (1 = degraded, 0 = ok)',
+  labelNames: ['capability'] as const,
+  registers: [register],
+});
+
+/**
  * SLI budgets per endpoint category (milliseconds).
  * p95 / p99 targets per issue requirements.
  */

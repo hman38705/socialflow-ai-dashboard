@@ -5,6 +5,10 @@ import { getRedisConnection } from '../config/runtime';
 // ---------------------------------------------------------------------------
 // Optional Redis store — only loaded in production to keep dev simple
 // ---------------------------------------------------------------------------
+
+/** True once initRateLimiters() resolves — indicates Redis store is active. */
+export let rateLimitRedisEnabled = false;
+
 async function buildStore() {
   if (process.env.NODE_ENV !== 'production') return undefined;
 
@@ -13,6 +17,7 @@ async function buildStore() {
     const { default: RedisStore } = await import('rate-limit-redis');
     const { default: Redis } = await import('ioredis');
     const client = new Redis(getRedisConnection());
+    rateLimitRedisEnabled = true;
     return new RedisStore({ sendCommand: (...args: string[]) => (client as any).call(...args) });
   } catch {
     // If rate-limit-redis isn't installed, fall back to memory store
