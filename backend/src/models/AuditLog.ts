@@ -27,7 +27,9 @@ export type AuditAction =
   | 'billing:cancel'
   // AI
   | 'ai:generate'
-  | 'ai:analyze';
+  | 'ai:analyze'
+  // Health
+  | 'health:config:update';
 
 export interface AuditLog {
   id: string;

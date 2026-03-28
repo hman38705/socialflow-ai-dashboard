@@ -1,12 +1,19 @@
 /**
  * Social service parity contract tests.
  *
- * Each shared suite runs against BOTH implementations:
- *   - backend/src/services/*                  (canonical)
- *   - backend/src/modules/social/services/*   (module copy)
+ * @deprecated The module copies have been consolidated into canonical implementations.
+ * This test now only validates the canonical services. The module paths are deprecated
+ * wrappers that re-export from the canonical locations.
  *
- * Both must produce identical responses for every scenario.
- * CI fails if any parity divergence is detected.
+ * Canonical locations:
+ *   - backend/src/services/FacebookService.ts
+ *   - backend/src/services/YouTubeService.ts
+ *   - backend/src/services/TwitterService.ts
+ *
+ * Module paths (deprecated, will be removed after migration):
+ *   - backend/src/modules/social/services/FacebookService.ts
+ *   - backend/src/modules/social/services/YouTubeService.ts
+ *   - backend/src/modules/social/services/TwitterService.ts
  */
 
 // ── Env must be set before any import ────────────────────────────────────────
@@ -22,11 +29,8 @@ process.env.YOUTUBE_CLIENT_SECRET = 'test-client-secret';
 
 import nock from 'nock';
 import { twitterService as twCanonical } from '../services/TwitterService';
-import { twitterService as twModule } from '../modules/social/services/TwitterService';
 import { facebookService as fbCanonical } from '../services/FacebookService';
-import { facebookService as fbModule } from '../modules/social/services/FacebookService';
 import { youTubeService as ytCanonical } from '../services/YouTubeService';
-import { youTubeService as ytModule } from '../modules/social/services/YouTubeService';
 
 beforeAll(() => nock.disableNetConnect());
 afterAll(() => nock.enableNetConnect());
@@ -155,12 +159,9 @@ function youTubeContract(label: string, svc: typeof ytCanonical) {
   });
 }
 
-// ── Execute each contract against both implementations ────────────────────────
+// ── Execute each contract against canonical implementations ──────────────────
+// Module copies have been consolidated into canonical implementations.
+// The module paths are now deprecated wrappers that re-export from canonical locations.
 twitterContract('canonical', twCanonical);
-twitterContract('module', twModule);
-
 facebookContract('canonical', fbCanonical);
-facebookContract('module', fbModule);
-
 youTubeContract('canonical', ytCanonical);
-youTubeContract('module', ytModule);

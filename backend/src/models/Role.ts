@@ -13,6 +13,7 @@ export const PERMISSIONS = [
   'users:manage',
   'roles:manage',
   'settings:manage',
+  'health:config:update',
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];
