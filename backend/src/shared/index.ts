@@ -1,6 +1,6 @@
 // Shared middleware
 export * from './middleware/authMiddleware';
-export * from './middleware/error';
+export * from '../middleware/error';
 export * from './middleware/requestId';
 export * from './middleware/validate';
 export * from './middleware/audit';
