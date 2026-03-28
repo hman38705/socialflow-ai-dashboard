@@ -8,6 +8,7 @@
  */
 
 import axios from 'axios';
+import crypto from 'crypto';
 
 // ============================================
 // Type Definitions
@@ -66,6 +67,49 @@ export interface UploadProgress {
 }
 
 export type ProgressCallback = (progress: UploadProgress) => void;
+
+// ============================================
+// Security & Configuration
+// ============================================
+
+/**
+ * Validates that secure signing is configured.
+ * @throws Error if Cloudinary API secret is not set
+ */
+function validateSecureSigningConfig(): void {
+  if (!process.env.CLOUDINARY_API_SECRET) {
+    throw new Error(
+      'FATAL: Secure signing misconfigured. CLOUDINARY_API_SECRET environment variable is required. ' +
+      'This is a critical security configuration. Refusing to start.'
+    );
+  }
+}
+
+/**
+ * Generates a cryptographically signed request for Cloudinary uploads.
+ * Uses SHA1 signature algorithm as per Cloudinary's security standards.
+ * 
+ * @param params - Upload parameters to sign
+ * @param apiSecret - Cloudinary API secret (from environment)
+ * @returns SHA1 signature hash
+ */
+function generateCloudinarySignature(params: Record<string, string>, apiSecret: string): string {
+  // Sort parameters by key
+  const sortedParams = Object.keys(params)
+    .sort()
+    .reduce((acc: Record<string, string>, key) => {
+      acc[key] = params[key];
+      return acc;
+    }, {});
+
+  // Create signature string: key1=value1&key2=value2&...&api_secret
+  const signatureString = Object.entries(sortedParams)
+    .map(([key, value]) => `${key}=${value}`)
+    .join('&') + `&${apiSecret}`;
+
+  // Return SHA1 hash
+  return crypto.createHash('sha1').update(signatureString).digest('hex');
+}
 
 // ============================================
 // Storage Provider Interface
@@ -199,27 +243,35 @@ class CloudinaryProvider implements IStorageProvider {
     onProgress?: ProgressCallback
   ): Promise<UploadResult> {
     try {
+      // Validate secure signing configuration before proceeding
+      validateSecureSigningConfig();
+
       const fileBuffer = await this.getFileBuffer(file);
       const fileName = options.fileName || `upload-${Date.now()}`;
       
-      // Build upload parameters
-      const params: Record<string, string | number> = {
-        file: fileBuffer.toString('base64'),
+      // Build upload parameters for signing (excluding file data)
+      const signingParams: Record<string, string> = {
         api_key: this.apiKey,
         timestamp: Math.floor(Date.now() / 1000).toString(),
         folder: options.folder || 'socialflow',
         public_id: fileName,
       };
 
-      // Add transformations
+      // Add transformations to signing params if present
       if (options.maxWidth || options.maxHeight || options.quality || options.format) {
         const transformation = this.buildTransformation(options);
-        params.transformation = transformation;
+        signingParams.transformation = transformation;
       }
 
-      // Generate signature (in production, sign on server)
-      // For demo, we'll skip signature verification
-      params.signature = 'demo_signature';
+      // Generate cryptographically signed request
+      const signature = generateCloudinarySignature(signingParams, this.apiSecret);
+
+      // Build full upload parameters with signature
+      const params: Record<string, string | number> = {
+        file: fileBuffer.toString('base64'),
+        ...signingParams,
+        signature,
+      };
 
       // Simulate progress
       if (onProgress) {
@@ -454,11 +506,23 @@ export const createStorageService = (config: StorageConfig): StorageService => {
   return new StorageService(config);
 };
 
+/**
+ * Guard function to ensure secure storage configuration on app startup.
+ * Must be called during application initialization.
+ * @throws Error if storage is not properly configured for secure operations
+ */
+export const validateStorageConfiguration = (): void => {
+  validateSecureSigningConfig();
+};
+
 // Convenience function for simple uploads
 export const uploadImage = async (
   file: Buffer | Blob | File,
   options?: UploadOptions
 ): Promise<UploadResult> => {
+  // Validate secure configuration before use
+  validateSecureSigningConfig();
+
   const config: StorageConfig = {
     provider: 'cloudinary',
     cloudinaryCloudName: process.env.CLOUDINARY_CLOUD_NAME || '',

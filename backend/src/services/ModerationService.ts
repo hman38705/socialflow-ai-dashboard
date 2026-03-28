@@ -4,6 +4,19 @@ const logger = createLogger('moderation-service');
 
 export type SensitivityLevel = 'low' | 'medium' | 'high';
 
+/**
+ * Structured alert event for moderation bypass incidents.
+ * Used for monitoring and alerting when moderation is skipped or blocked.
+ */
+export interface ModerationAlert {
+  type: 'MODERATION_BYPASSED' | 'MODERATION_BLOCKED' | 'MODERATION_ERROR';
+  timestamp: Date;
+  mode: 'fail-open' | 'fail-closed';
+  reason: string;
+  severity: 'warning' | 'error' | 'critical';
+  context?: Record<string, unknown>;
+}
+
 export interface ModerationResult {
   flagged: boolean;
   blocked: boolean;
@@ -57,6 +70,41 @@ function getMode(): 'fail-open' | 'fail-closed' {
 
 const BYPASS_RESULT: ModerationResult = { flagged: false, blocked: false, categories: {}, scores: {} };
 
+/**
+ * Emits a structured alert event for moderation system state changes.
+ * This enables monitoring dashboards and alerting systems to track moderation
+ * bypass events, errors, and blocks in real-time.
+ * 
+ * Production setup should forward these alerts to:
+ * - Sentry/error tracking (for errors)
+ * - CloudWatch/DataDog/similar (for metrics)
+ * - Slack/PagerDuty (for critical alerts)
+ */
+function emitModerationAlert(alert: ModerationAlert): void {
+  const alertMsg = `[MODERATION-ALERT] type=${alert.type} mode=${alert.mode} severity=${alert.severity}`;
+  
+  switch (alert.severity) {
+    case 'critical':
+      // Critical alerts should trigger immediate actions
+      logger.error(alertMsg, {
+        reason: alert.reason,
+        timestamp: alert.timestamp,
+        context: alert.context,
+      });
+      // TODO: Emit to error tracking system (Sentry, etc.)
+      break;
+    case 'error':
+      logger.error(alertMsg, { reason: alert.reason, context: alert.context });
+      break;
+    case 'warning':
+      logger.warn(alertMsg, { reason: alert.reason, context: alert.context });
+      break;
+  }
+  
+  // TODO: Emit structured event to monitoring system (CloudWatch, DataDog, etc.)
+  // Example: metrics.emit('moderation_alert', { type: alert.type, mode: alert.mode });
+}
+
 export const ModerationService = {
   isConfigured(): boolean {
     return !!process.env.OPENAI_API_KEY;
@@ -65,17 +113,60 @@ export const ModerationService = {
   /**
    * Moderate content using the OpenAI Moderation API.
    *
-   * When the provider is unavailable the behaviour depends on MODERATION_MODE:
-   *   fail-open   — returns a clean pass-through result (default)
-   *   fail-closed — throws so the caller can block the content
+   * Behavior when the provider is unavailable depends on MODERATION_MODE:
+   *
+   *   fail-open (default)
+   *   ─────────────────
+   *   - Content is allowed through
+   *   - Warning is logged
+   *   - Alert is emitted
+   *   - Use when: service availability > safety (e.g., user-facing features)
+   *   - Risk: unsafe content may slip through in misconfigured deployments
+   *   - Test: verify alerts are emitted for missing OPENAI_API_KEY
+   *
+   *   fail-closed
+   *   ──────────
+   *   - Content is blocked with an error
+   *   - Error is logged and thrown
+   *   - Critical alert is emitted
+   *   - Use when: safety > availability (e.g., compliance-critical systems)
+   *   - Risk: legitimate content blocked if service is down
+   *   - Test: verify errors are thrown and requests rejected
+   *
+   * Configuration:
+   *   MODERATION_MODE=fail-open     (default, less strict)
+   *   MODERATION_MODE=fail-closed   (strict, safety-first)
+   *   OPENAI_API_KEY=sk-xxx         (required, otherwise behavior above applies)
+   *   MODERATION_SENSITIVITY=low|medium|high  (default: medium)
    */
   async moderate(text: string): Promise<ModerationResult> {
     if (!this.isConfigured()) {
       const msg = 'ModerationService: OPENAI_API_KEY not set — skipping moderation';
-      if (getMode() === 'fail-closed') {
+      const mode = getMode();
+      
+      if (mode === 'fail-closed') {
+        // Critical security alert: moderation disabled in fail-closed mode
+        emitModerationAlert({
+          type: 'MODERATION_BLOCKED',
+          timestamp: new Date(),
+          mode: 'fail-closed',
+          reason: 'OPENAI_API_KEY not configured',
+          severity: 'critical',
+          context: { config_status: 'missing_api_key' },
+        });
         logger.error(msg);
         throw new Error('Moderation unavailable: OPENAI_API_KEY not set');
       }
+      
+      // Warning level: moderation bypassed in fail-open mode
+      emitModerationAlert({
+        type: 'MODERATION_BYPASSED',
+        timestamp: new Date(),
+        mode: 'fail-open',
+        reason: 'OPENAI_API_KEY not configured, failing open',
+        severity: 'warning',
+        context: { config_status: 'missing_api_key' },
+      });
       logger.warn(msg);
       return BYPASS_RESULT;
     }
@@ -90,10 +181,40 @@ export const ModerationService = {
       signal: AbortSignal.timeout(10_000),
     }).catch((err: unknown) => {
       const isTimeout = err instanceof Error && err.name === 'TimeoutError';
-      const msg = isTimeout ? 'Moderation API timeout' : 'Moderation API unreachable';
-      logger.error(msg, { error: err instanceof Error ? err.message : String(err) });
-      if (getMode() === 'fail-closed') throw new Error(msg);
-      logger.warn(`${msg} — failing open`);
+      const errorReason = isTimeout ? 'Moderation API timeout (10s)' : 'Moderation API unreachable';
+      const mode = getMode();
+      
+      logger.error(errorReason, { error: err instanceof Error ? err.message : String(err) });
+      
+      if (mode === 'fail-closed') {
+        // Critical alert: moderation error in fail-closed mode
+        emitModerationAlert({
+          type: 'MODERATION_ERROR',
+          timestamp: new Date(),
+          mode: 'fail-closed',
+          reason: errorReason,
+          severity: 'critical',
+          context: {
+            is_timeout: isTimeout,
+            error: err instanceof Error ? err.message : String(err),
+          },
+        });
+        throw new Error(errorReason);
+      }
+      
+      // Warning: moderation error but failing open
+      emitModerationAlert({
+        type: 'MODERATION_BYPASSED',
+        timestamp: new Date(),
+        mode: 'fail-open',
+        reason: `${errorReason}, failing open`,
+        severity: 'warning',
+        context: {
+          is_timeout: isTimeout,
+          error: err instanceof Error ? err.message : String(err),
+        },
+      });
+      logger.warn(`${errorReason} — failing open`);
       return null;
     });
 
@@ -101,8 +222,31 @@ export const ModerationService = {
 
     if (!response.ok) {
       const body = await response.text();
+      const mode = getMode();
       logger.error('OpenAI Moderation API error', { status: response.status, body });
-      throw new Error(`Moderation API returned ${response.status}`);
+      
+      if (mode === 'fail-closed') {
+        emitModerationAlert({
+          type: 'MODERATION_ERROR',
+          timestamp: new Date(),
+          mode: 'fail-closed',
+          reason: `Moderation API returned ${response.status}`,
+          severity: 'error',
+          context: { http_status: response.status },
+        });
+        throw new Error(`Moderation API returned ${response.status}`);
+      }
+      
+      // Fail open: log warning but continue
+      emitModerationAlert({
+        type: 'MODERATION_BYPASSED',
+        timestamp: new Date(),
+        mode: 'fail-open',
+        reason: `Moderation API error ${response.status}, failing open`,
+        severity: 'warning',
+        context: { http_status: response.status },
+      });
+      return BYPASS_RESULT;
     }
 
     let data: {
@@ -117,9 +261,31 @@ export const ModerationService = {
       data = (await response.json()) as typeof data;
       if (!Array.isArray(data?.results) || !data.results[0]) throw new Error('unexpected shape');
     } catch {
+      const mode = getMode();
       const msg = 'Moderation API returned malformed response';
       logger.error(msg);
-      if (getMode() === 'fail-closed') throw new Error(msg);
+      
+      if (mode === 'fail-closed') {
+        emitModerationAlert({
+          type: 'MODERATION_ERROR',
+          timestamp: new Date(),
+          mode: 'fail-closed',
+          reason: msg,
+          severity: 'error',
+          context: { error_type: 'malformed_response' },
+        });
+        throw new Error(msg);
+      }
+      
+      // Fail open: log warning
+      emitModerationAlert({
+        type: 'MODERATION_BYPASSED',
+        timestamp: new Date(),
+        mode: 'fail-open',
+        reason: `${msg}, failing open`,
+        severity: 'warning',
+        context: { error_type: 'malformed_response' },
+      });
       logger.warn(`${msg} — failing open`);
       return BYPASS_RESULT;
     }
