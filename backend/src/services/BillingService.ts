@@ -245,8 +245,8 @@ export class BillingService {
       plan,
       status: stripeSub.status as Subscription['status'],
       stripeSubscriptionId: stripeSub.id,
-      currentPeriodEnd: stripeSub.billing_cycle_anchor
-        ? new Date(stripeSub.billing_cycle_anchor * 1000)
+      currentPeriodEnd: stripeSub.items.data[0]?.current_period_end
+        ? new Date(stripeSub.items.data[0].current_period_end * 1000)
         : null,
     });
   }

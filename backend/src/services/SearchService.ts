@@ -63,6 +63,16 @@ export async function searchPosts(
     offset?: number;
   } = {},
 ) {
+  const VALID_PLATFORMS = new Set(['twitter', 'instagram', 'facebook', 'linkedin', 'tiktok', 'youtube']);
+  const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+  if (opts.platform && !VALID_PLATFORMS.has(opts.platform)) {
+    throw new Error('Invalid platform value');
+  }
+  if (opts.organizationId && !UUID_RE.test(opts.organizationId)) {
+    throw new Error('Invalid organizationId');
+  }
+
   const filter: string[] = [];
   if (opts.organizationId) filter.push(`organizationId = "${opts.organizationId}"`);
   if (opts.platform) filter.push(`platform = "${opts.platform}"`);

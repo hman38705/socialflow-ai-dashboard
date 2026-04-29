@@ -132,6 +132,12 @@ const envSchema = z.object({
   MEILISEARCH_ADMIN_KEY: z.string().optional(),
   MEILISEARCH_SEARCH_KEY: z.string().optional(),
 
+  // ── Moderation ────────────────────────────────────────────────────────────
+  // fail-closed (default): block content when provider is unavailable — safer for production.
+  // fail-open: allow content through when provider is unavailable — requires explicit opt-in.
+  MODERATION_MODE: z.enum(['fail-open', 'fail-closed']).default('fail-closed'),
+  MODERATION_SENSITIVITY: z.enum(['low', 'medium', 'high']).default('medium'),
+
   // ── AWS S3 ────────────────────────────────────────────────────────────────
   S3_PRESIGNED_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
 });

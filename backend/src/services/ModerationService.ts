@@ -63,13 +63,16 @@ function getSensitivity(tenantId?: string): SensitivityLevel {
  * MODERATION_MODE controls behaviour when the provider is unavailable
  * (missing API key, timeout, or malformed response):
  *
- *   fail-open   (default) — bypass moderation and allow the content through.
- *                           Logs a warning. Use when availability > safety.
- *   fail-closed           — block the content and throw.
+ *   fail-closed (default) — block the content and throw.
  *                           Use when safety > availability.
+ *   fail-open             — bypass moderation and allow the content through.
+ *                           Logs a warning. Use when availability > safety.
+ *                           Requires explicit opt-in: MODERATION_MODE=fail-open
  */
 function getMode(): 'fail-open' | 'fail-closed' {
-  return process.env.MODERATION_MODE === 'fail-closed' ? 'fail-closed' : 'fail-open';
+  if (process.env.MODERATION_MODE === 'fail-open') return 'fail-open';
+  // Default to fail-closed — safer for production
+  return 'fail-closed';
 }
 
 const BYPASS_RESULT: ModerationResult = { flagged: false, blocked: false, categories: {}, scores: {} };
@@ -119,17 +122,8 @@ export const ModerationService = {
    *
    * Behavior when the provider is unavailable depends on MODERATION_MODE:
    *
-   *   fail-open (default)
-   *   ─────────────────
-   *   - Content is allowed through
-   *   - Warning is logged
-   *   - Alert is emitted
-   *   - Use when: service availability > safety (e.g., user-facing features)
-   *   - Risk: unsafe content may slip through in misconfigured deployments
-   *   - Test: verify alerts are emitted for missing OPENAI_API_KEY
-   *
-   *   fail-closed
-   *   ──────────
+   *   fail-closed (default)
+   *   ─────────────────────
    *   - Content is blocked with an error
    *   - Error is logged and thrown
    *   - Critical alert is emitted
@@ -137,9 +131,19 @@ export const ModerationService = {
    *   - Risk: legitimate content blocked if service is down
    *   - Test: verify errors are thrown and requests rejected
    *
+   *   fail-open
+   *   ─────────
+   *   - Content is allowed through
+   *   - Warning is logged
+   *   - Alert is emitted
+   *   - Use when: service availability > safety (e.g., user-facing features)
+   *   - Risk: unsafe content may slip through in misconfigured deployments
+   *   - Test: verify alerts are emitted for missing OPENAI_API_KEY
+   *   - Requires explicit opt-in: MODERATION_MODE=fail-open
+   *
    * Configuration:
-   *   MODERATION_MODE=fail-open     (default, less strict)
-   *   MODERATION_MODE=fail-closed   (strict, safety-first)
+   *   MODERATION_MODE=fail-closed   (default, safety-first)
+   *   MODERATION_MODE=fail-open     (explicit opt-in, less strict)
    *   OPENAI_API_KEY=sk-xxx         (required, otherwise behavior above applies)
    *   MODERATION_SENSITIVITY=low|medium|high  (default: medium)
    */
