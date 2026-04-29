@@ -1,5 +1,8 @@
 import Redis from 'ioredis';
 import { redis } from '../lib/redis';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('AuthBlacklistService');
 
 const BLACKLIST_PREFIX = 'jwt:blacklist:';
 
@@ -29,15 +32,25 @@ export const AuthBlacklistService = {
    */
   blacklistToken: async (tokenKey: string, ttlSeconds: number): Promise<void> => {
     if (ttlSeconds <= 0) return; // already expired, nothing to store
-    await getRedis().set(`${BLACKLIST_PREFIX}${tokenKey}`, '1', 'EX', ttlSeconds);
+    try {
+      await getRedis().set(`${BLACKLIST_PREFIX}${tokenKey}`, '1', 'EX', ttlSeconds);
+    } catch (err) {
+      logger.warn('Redis unavailable — token blacklist write skipped', { tokenKey, err });
+    }
   },
 
   /**
    * Returns true if the token has been blacklisted.
+   * Fails closed on Redis error: denies the request to prevent revoked tokens from passing.
    */
   isBlacklisted: async (tokenKey: string): Promise<boolean> => {
-    const result = await getRedis().get(`${BLACKLIST_PREFIX}${tokenKey}`);
-    return result !== null;
+    try {
+      const result = await getRedis().get(`${BLACKLIST_PREFIX}${tokenKey}`);
+      return result !== null;
+    } catch (err) {
+      logger.error('Redis unavailable for blacklist check — failing closed', { tokenKey, err });
+      return true; // deny on error (fail-closed)
+    }
   },
 
   /**

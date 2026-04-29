@@ -7,6 +7,7 @@ import { createLogger } from '../lib/logger';
 import { config } from '../config/config';
 import { getRedisConnection } from '../config/runtime';
 import { eventBus, JobProgressEvent } from '../lib/eventBus';
+import { prisma } from '../lib/prisma';
 
 const logger = createLogger('SocketService');
 
@@ -73,7 +74,7 @@ export class SocketService {
       }
     });
 
-    this.io.on('connection', (socket: AuthenticatedSocket) => {
+    this.io.on('connection', async (socket: AuthenticatedSocket) => {
       logger.info(`Authorized connection from ${socket.id}`);
 
       // Join user-specific room for job progress
@@ -86,10 +87,17 @@ export class SocketService {
 
       // Auto-join specific namespace or org-based rooms based on client query
       const orgId = socket.handshake.query.orgId as string;
-      if (orgId) {
-        const roomName = `org:${orgId}`;
-        socket.join(roomName);
-        logger.info(`Client ${socket.id} joined room ${roomName}`);
+      if (orgId && userId) {
+        const member = await prisma.organizationMember.findFirst({
+          where: { organizationId: orgId, userId },
+        });
+        if (member) {
+          socket.join(`org:${orgId}`);
+          logger.info(`Client ${socket.id} joined room org:${orgId}`);
+        } else {
+          socket.emit('error', { message: 'Not a member of this organisation' });
+          logger.warn(`Client ${socket.id} denied access to org:${orgId} — not a member`);
+        }
       }
 
       // Handle message events dynamically
