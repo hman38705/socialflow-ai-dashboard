@@ -120,7 +120,19 @@ export class CohortService {
   /**
    * Raw SQL aggregation: joins User → OrganizationMember → Post to get
    * per-user activity counts and recency in a single query.
+   *
+   * SQL-INJECTION AUDIT (issue #922): All user-supplied values (organizationId,
+   * userId) are passed as sqltag template parameters, never via string
+   * interpolation. Prisma's sqltag sends them as prepared-statement bind
+   * variables, so they cannot alter query structure.
+   *
+   * REVIEW CHECKLIST for any future edits to this method:
+   *   - Never use `${value}` inside a plain template literal passed to $queryRaw.
+   *   - Always use sqltag`…${value}…` so Prisma parameterises the value.
+   *   - Conditional clauses must use sqltag`` fragments or `empty`, not string
+   *     concatenation.
    */
+  // sql-review: raw query — all dynamic values are sqltag-parameterised
   private async fetchActivityStats(
     organizationId?: string,
     userId?: string,
