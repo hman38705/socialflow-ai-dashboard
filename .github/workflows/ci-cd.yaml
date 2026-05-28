@@ -62,7 +62,7 @@ jobs:
             ${{ env.IMAGE }}:latest
 
       - name: Set up kubectl
-        uses: azure/setup-kubectl@v3
+        uses: azure/setup-kubectl@v5
 
       - name: Configure kubeconfig
         run: |
