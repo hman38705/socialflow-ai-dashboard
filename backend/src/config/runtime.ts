@@ -41,6 +41,7 @@ const parsePathList = (value: string | undefined, fallback: string[]): string[] 
 
 export interface DataRetentionConfig {
   enabled: boolean;
+  dryRun: boolean;
   mode: 'archive' | 'delete';
   archiveDirectory: string;
   scheduleCron: string;
@@ -61,6 +62,7 @@ export const getAdminIpWhitelist = (): string[] =>
 
 export const getDataRetentionConfig = (): DataRetentionConfig => ({
   enabled: config.DATA_PRUNING_ENABLED,
+  dryRun: config.DATA_PRUNING_DRY_RUN,
   mode: config.DATA_RETENTION_MODE,
   archiveDirectory: config.DATA_RETENTION_ARCHIVE_DIR,
   scheduleCron: config.DATA_PRUNING_CRON,

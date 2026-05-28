@@ -20,6 +20,11 @@ export interface DependencyStatus {
   error?: string;
 }
 
+export interface ProviderStatus {
+  available: boolean;
+  provider: string;
+}
+
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
   return Promise.race([
     promise,
@@ -176,6 +181,7 @@ export class HealthService {
   public async getSystemStatus(): Promise<{
     dependencies: { database: DependencyStatus; redis: DependencyStatus; s3: DependencyStatus; twitter: DependencyStatus };
     overallStatus: 'healthy' | 'degraded' | 'unhealthy';
+    providers?: { tts: ProviderStatus };
   }> {
     const [database, redis, s3, twitter] = await Promise.all([
       this.checkDatabase(),
@@ -187,6 +193,9 @@ export class HealthService {
     const dependencies = { database, redis, s3, twitter };
     const statuses = Object.values(dependencies).map((d) => d.status);
     const overallStatus = statuses.includes('unhealthy') ? 'unhealthy' : statuses.includes('degraded') ? 'degraded' : 'healthy';
+
+    // Check TTS provider availability
+    const ttsProvider = this.getTTSProviderStatus();
 
     if (this.healthMonitor) {
       await Promise.all(
@@ -204,7 +213,22 @@ export class HealthService {
     }
 
     logger.info('System status', { overallStatus });
-    return { dependencies, overallStatus };
+    return { dependencies, overallStatus, providers: { tts: ttsProvider } };
+  }
+
+  private getTTSProviderStatus(): ProviderStatus {
+    const hasElevenLabs = !!process.env.ELEVENLABS_API_KEY;
+    const hasGoogle = !!process.env.GOOGLE_TTS_API_KEY;
+
+    if (hasElevenLabs && hasGoogle) {
+      return { available: true, provider: 'elevenlabs (primary), google (fallback)' };
+    } else if (hasElevenLabs) {
+      return { available: true, provider: 'elevenlabs' };
+    } else if (hasGoogle) {
+      return { available: true, provider: 'google' };
+    } else {
+      return { available: false, provider: 'none' };
+    }
   }
 }
 
