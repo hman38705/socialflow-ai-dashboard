@@ -24,6 +24,8 @@ spec:
       ports:
         - protocol: UDP
           port: 53
+        - protocol: TCP
+          port: 53
     # Redis (ElastiCache) - session and queue storage
     - to:
         - podSelector:
@@ -40,6 +42,14 @@ spec:
       ports:
         - protocol: TCP
           port: 5432
+    # MeiliSearch - full-text search
+    - to:
+        - podSelector:
+            matchLabels:
+              app: meilisearch
+      ports:
+        - protocol: TCP
+          port: 7700
     # OTLP collector - observability telemetry
     - to:
         - namespaceSelector:
@@ -51,7 +61,7 @@ spec:
       ports:
         - protocol: TCP
           port: 4318
-    # External platform APIs - HTTPS only
+    # External platform APIs - HTTPS only (Stripe, Twitter, Facebook, Instagram, TikTok, YouTube, LinkedIn)
     - to:
         - namespaceSelector: {}
       ports:
