@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { twoFactorService, TwoFactorUnavailableError } from '../services/twoFactorService';
 import QRCodeDisplay from './QRCodeDisplay';
 
@@ -33,6 +33,15 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
   const [loading, setLoading] = useState(false);
 
   const isEnabled = twoFactorService.isEnabled();
+
+  // Clear TOTP secret from state on component unmount
+  useEffect(() => {
+    return () => {
+      setSecret('');
+      setUri('');
+      setToken('');
+    };
+  }, []);
 
   // ── Enable flow ─────────────────────────────────────────────────────────────
 
@@ -79,6 +88,9 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
     try {
       await twoFactorService.enable(secret);
       await twoFactorService.storeRecoveryCodes(recoveryCodes.map(code => ({ code })));
+      setSecret('');
+      setUri('');
+      setToken('');
       setStep('DONE');
       onSetupComplete();
     } catch (e) {
