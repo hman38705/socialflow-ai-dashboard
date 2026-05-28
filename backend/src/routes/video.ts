@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { videoService } from '../services/VideoService';
 import { videoQueue } from '../queues/VideoQueue';
 import { videoHealthService } from '../services/VideoHealthService';
@@ -76,7 +78,8 @@ const upload = multer({
  *       500:
  *         description: Upload failed
  */
-router.post('/upload', upload.single('video'), async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/upload', authMiddleware, checkPermission('posts:create'), upload.single('video'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file provided' });
@@ -174,7 +177,8 @@ router.get('/jobs', (req: Request, res: Response) => {
  * DELETE /api/video/job/:jobId
  * Cancel a transcoding job
  */
-router.delete('/job/:jobId', async (req: Request, res: Response) => {
+// Required permission: posts:delete
+router.delete('/job/:jobId', authMiddleware, checkPermission('posts:delete'), async (req: Request, res: Response) => {
   const { jobId } = req.params;
   const cancelled = await videoService.cancelJob(jobId);
 

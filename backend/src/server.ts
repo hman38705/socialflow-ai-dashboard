@@ -16,10 +16,12 @@ import { startHealthMonitoringJob, stopHealthMonitoringJob } from './jobs/health
 import { initializeHealthMonitoring } from './monitoring/healthMonitoringInstance';
 import { createLogger } from './lib/logger';
 import { prisma } from './lib/prisma';
+import { initDirectories } from './utils/initDirectories';
 import { Worker } from 'bullmq';
 import { Server } from 'http';
 import { createSmsService } from './services/smsService';
 import { initialize2FaLockoutStore } from './services/TwoFactorLockoutInit';
+import { checkRateLimiterStore } from './middleware/rateLimit';
 
 const logger = createLogger('server');
 const PORT = config.BACKEND_PORT;
@@ -211,12 +213,27 @@ process.on('SIGTERM', () => {
 export const bootstrap = async (exit?: (code: number) => void): Promise<void> => {
   const doExit = exit ?? ((code) => process.exit(code));
   try {
+    // Initialize required directories
+    try {
+      await initDirectories();
+      logger.info('Required directories initialized');
+    } catch (error) {
+      logger.error('Failed to initialize directories', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      doExit(1);
+      return;
+    }
+
     // Initialize SMS service
     createSmsService({
       accountSid: config.TWILIO_ACCOUNT_SID,
       authToken: config.TWILIO_AUTH_TOKEN,
       fromNumber: config.TWILIO_FROM_NUMBER,
     });
+
+    // Verify rate-limiter Redis store is reachable (#916)
+    await checkRateLimiterStore(doExit);
 
     // Initialize 2FA lockout store with Redis backend (#610)
     try {

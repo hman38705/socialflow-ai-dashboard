@@ -76,6 +76,31 @@ export let aiLimiter: RateLimitRequestHandler;
 export let generalLimiter: RateLimitRequestHandler;
 
 /**
+ * Verify the rate-limiter Redis store is reachable at startup.
+ *
+ * In production, a missing or unreachable Redis store means rate limits are
+ * not shared across instances — a silent misconfiguration that can allow
+ * credential-stuffing attacks. We therefore treat it as fatal in production
+ * and log a warning (falling back to the in-memory store) in other envs.
+ */
+export async function checkRateLimiterStore(
+  exit: (code: number) => void = (code) => process.exit(code),
+): Promise<void> {
+  const store = await getStore();
+  if (!store) {
+    const msg =
+      'Rate limiter Redis store is unavailable — falling back to in-memory store. ' +
+      'Rate limits will NOT be shared across instances.';
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[rateLimit] FATAL: ${msg}`);
+      exit(1);
+    } else {
+      console.warn(`[rateLimit] WARNING: ${msg}`);
+    }
+  }
+}
+
+/**
  * Call once during app bootstrap (before routes are registered).
  * Resolves the Redis store (if production) and wires up all limiters.
  */

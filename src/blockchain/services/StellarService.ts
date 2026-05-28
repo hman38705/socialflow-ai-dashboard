@@ -1,4 +1,4 @@
-// @ts-ignore - stellar-sdk types issue with bundler
+// @ts-expect-error - stellar-sdk exports CommonJS module without proper ESM type definitions
 import StellarSdk from '@stellar/stellar-sdk';
 const { Server, TransactionBuilder, Asset, Operation, Transaction, FeeBumpTransaction } = StellarSdk;
 import { NetworkConfig, DEFAULT_NETWORK } from '../config/networks';
@@ -24,6 +24,10 @@ export class StellarService {
     this.config = initialConfig;
     this.pool = this.initializePool(this.config.horizonUrl);
     this.offlineQueue = new OfflineQueue(redisClient);
+    // Restore any transactions queued before the last restart
+    this.offlineQueue.restoreFromRedis().catch((err) =>
+      console.error('Failed to restore offline queue from Redis:', err),
+    );
   }
 
   // --- 2.2 Connection Management ---

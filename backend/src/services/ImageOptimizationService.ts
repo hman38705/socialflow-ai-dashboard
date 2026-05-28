@@ -4,8 +4,7 @@ import path from 'path';
 import crypto from 'crypto';
 
 const CACHE_DIR = path.join(process.cwd(), 'uploads', 'images', 'cache');
-// SUPPORTED_FORMATS reserved for future format validation
-const _SUPPORTED_FORMATS = ['jpeg', 'png', 'webp', 'gif'];
+// TODO: Implement format validation (tracked in future issue)
 
 interface OptimizationOptions {
   width?: number;

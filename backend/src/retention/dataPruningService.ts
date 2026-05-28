@@ -87,6 +87,7 @@ const pruneTarget = async (
   target: PruningTarget,
   config: DataRetentionConfig,
   metrics: CategoryMetrics,
+  dryRun: boolean = false,
 ): Promise<void> => {
   const absoluteBasePath = toAbsolutePath(target.basePath);
 
@@ -124,10 +125,21 @@ const pruneTarget = async (
 
       metrics.eligibleFiles += 1;
 
-      if (config.mode === 'archive') {
+      if (dryRun) {
+        logger.info(`[DRY-RUN] Would ${config.mode === 'archive' ? 'archive' : 'delete'}: ${filePath}`);
+        if (config.mode === 'archive') {
+          metrics.archivedFiles += 1;
+        } else {
+          metrics.deletedFiles += 1;
+        }
+      } else if (config.mode === 'archive') {
         const archiveRoot = path.join(toAbsolutePath(config.archiveDirectory), target.category);
         await archiveFile(filePath, archiveRoot, path.relative(absoluteBasePath, filePath));
         metrics.archivedFiles += 1;
+      } else if (config.dryRun) {
+        // Dry-run mode: log what would be deleted without actually deleting
+        logger.info(`[DRY-RUN] Would delete file`, { filePath, category: target.category });
+        metrics.deletedFiles += 1;
       } else {
         await fs.unlink(filePath);
         metrics.deletedFiles += 1;
@@ -186,19 +198,40 @@ const maybeSendMissingPathAlert = async (
 export const runDataPruning = async (
   overrideConfig?: Partial<DataRetentionConfig>,
   notificationManager?: NotificationManager,
+  dryRun: boolean = false,
 ): Promise<DataPruningSummary> => {
   const config: DataRetentionConfig = {
     ...getDataRetentionConfig(),
     ...overrideConfig,
   };
 
+  // Safeguard: require explicit opt-in for delete mode
+  if (config.mode === 'delete' && !config.enabled) {
+    logger.warn('Data pruning is disabled (DATA_PRUNING_ENABLED=false). Skipping pruning run.');
+    return {
+      scannedFiles: 0,
+      eligibleFiles: 0,
+      archivedFiles: 0,
+      deletedFiles: 0,
+      skippedFiles: 0,
+      errors: [],
+      byCategory: {
+        logs: emptyMetrics(),
+        analytics: emptyMetrics(),
+      },
+    };
+  }
+
   const byCategory: Record<'logs' | 'analytics', CategoryMetrics> = {
     logs: emptyMetrics(),
     analytics: emptyMetrics(),
   };
 
-  logger.info('Starting data retention pruning run', {
+  const mode = dryRun ? 'DRY-RUN' : 'LIVE';
+  logger.info(`Starting data retention pruning run [${mode}]`, {
     mode: config.mode,
+    dryRun: config.dryRun,
+    enabled: config.enabled,
     missingPathPolicy: config.missingPathPolicy,
     logsRetentionDays: config.logsRetentionDays,
     analyticsRetentionDays: config.analyticsRetentionDays,
@@ -220,18 +253,19 @@ export const runDataPruning = async (
   ];
 
   for (const target of targets) {
-    await pruneTarget(target, config, byCategory[target.category]);
+    await pruneTarget(target, config, byCategory[target.category], dryRun);
   }
 
   const summary = buildSummary(byCategory);
 
-  logger.info('Data retention pruning completed', {
+  logger.info(`Data retention pruning completed [${mode}]`, {
     scannedFiles: summary.scannedFiles,
     eligibleFiles: summary.eligibleFiles,
     archivedFiles: summary.archivedFiles,
     deletedFiles: summary.deletedFiles,
     skippedFiles: summary.skippedFiles,
     errorCount: summary.errors.length,
+    dryRun: config.dryRun,
     byCategory: {
       logs: {
         ...summary.byCategory.logs,

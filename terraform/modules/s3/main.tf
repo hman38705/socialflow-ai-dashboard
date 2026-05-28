@@ -28,10 +28,26 @@ resource "aws_s3_bucket_public_access_block" "main" {
 
 resource "aws_s3_bucket_lifecycle_configuration" "main" {
   bucket = aws_s3_bucket.main.id
+
   rule {
     id     = "expire-old-uploads"
     status = "Enabled"
     filter { prefix = "uploads/" }
     expiration { days = var.env == "prod" ? 365 : 30 }
+  }
+
+  rule {
+    id     = "backup-retention"
+    status = "Enabled"
+    filter { prefix = "backups/" }
+
+    # Remove current backup objects after 30 days
+    expiration { days = 30 }
+
+    # Remove non-current versions (after versioning overwrites) after 7 days
+    noncurrent_version_expiration { noncurrent_days = 7 }
+
+    # Clean up incomplete multipart uploads after 1 day
+    abort_incomplete_multipart_upload { days_after_initiation = 1 }
   }
 }

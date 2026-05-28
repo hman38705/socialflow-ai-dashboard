@@ -60,7 +60,15 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Bare /health for load-balancer probes (no versioning needed)
 app.get('/health', (_req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  const { config } = require('./config/config');
+  const ttsAvailable = !!(config.ELEVENLABS_API_KEY || config.GOOGLE_TTS_API_KEY);
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    features: {
+      tts: ttsAvailable ? 'available' : 'unavailable',
+    },
+  });
 });
 
 // Prometheus metrics scrape endpoint

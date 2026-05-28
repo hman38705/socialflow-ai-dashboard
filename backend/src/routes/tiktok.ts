@@ -2,6 +2,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { tiktokService } from '../services/TikTokService';
 import { enqueueTikTokVideoUpload } from '../jobs/tiktokVideoJob';
 import { dispatchEvent } from '../services/WebhookDispatcher';
@@ -101,7 +103,8 @@ router.get('/user', async (req: Request, res: Response) => {
  *
  * Header: x-tiktok-token, x-tiktok-refresh-token, x-tiktok-expires-at
  */
-router.post('/video/upload', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/video/upload', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   const accessToken = req.headers['x-tiktok-token'] as string;
   const refreshToken = req.headers['x-tiktok-refresh-token'] as string;
   const expiresAt = Number(req.headers['x-tiktok-expires-at']);
@@ -171,7 +174,8 @@ router.post('/video/upload', async (req: Request, res: Response) => {
  * Body: { videoUrl, title, description?, privacyLevel? }
  * Header: x-tiktok-token
  */
-router.post('/video/upload-url', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/video/upload-url', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   const accessToken = req.headers['x-tiktok-token'] as string;
   if (!accessToken) {
     return res.status(400).json({ error: 'x-tiktok-token header required.' });

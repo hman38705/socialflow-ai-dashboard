@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { ExportService } from '../services/ExportService';
 
 const router = Router();
@@ -39,7 +41,8 @@ const router = Router();
  *       400:
  *         description: Validation error
  */
-router.get('/analytics', async (req: Request, res: Response) => {
+// Required permission: analytics:export
+router.get('/analytics', authMiddleware, checkPermission('analytics:export'), async (req: Request, res: Response) => {
   try {
     const { organizationId, format, startDate, endDate } = req.query;
 
@@ -115,7 +118,8 @@ router.get('/analytics', async (req: Request, res: Response) => {
  *       400:
  *         description: Validation error
  */
-router.get('/posts', async (req: Request, res: Response) => {
+// Required permission: analytics:export
+router.get('/posts', authMiddleware, checkPermission('analytics:export'), async (req: Request, res: Response) => {
   try {
     const { organizationId, format, startDate, endDate } = req.query;
 

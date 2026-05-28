@@ -15,6 +15,12 @@ const envSchema = z.object({
   // Override here to hard-pin values regardless of NODE_ENV.
   DB_CONNECTION_LIMIT: z.coerce.number().int().positive().optional(),
   DB_POOL_TIMEOUT: z.coerce.number().int().positive().optional(),
+  // Set to 'true' when a PgBouncer proxy sits in front of Postgres.
+  // In transaction mode, PgBouncer requires connection_limit=1 per application process.
+  PGBOUNCER_MODE: z
+    .string()
+    .optional()
+    .transform((v) => v === 'true'),
 
   // ── JWT ───────────────────────────────────────────────────────────────────
   JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
@@ -81,7 +87,13 @@ const envSchema = z.object({
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
 
   // ── Alerting ──────────────────────────────────────────────────────────────
-  SLACK_WEBHOOK_URL: z.string().optional(),
+  SLACK_WEBHOOK_URL: z
+    .string()
+    .optional()
+    .refine(
+      (url) => !url || url.startsWith('https://hooks.slack.com/'),
+      'SLACK_WEBHOOK_URL must start with https://hooks.slack.com/',
+    ),
   PAGERDUTY_INTEGRATION_KEY: z.string().optional(),
   ALERT_ERROR_RATE_PERCENT: z.coerce.number().default(10),
   ALERT_RESPONSE_TIME_MS: z.coerce.number().default(5000),
@@ -93,8 +105,13 @@ const envSchema = z.object({
   DATA_PRUNING_ENABLED: z
     .enum(['true', 'false', '1', '0'])
     .optional()
-    .transform((v) => v !== 'false' && v !== '0')
-    .default(true),
+    .transform((v) => v === 'true' || v === '1')
+    .default(false),
+  DATA_PRUNING_DRY_RUN: z
+    .enum(['true', 'false', '1', '0'])
+    .optional()
+    .transform((v) => v === 'true' || v === '1')
+    .default(false),
   DATA_RETENTION_MODE: z.enum(['archive', 'delete']).default('archive'),
   DATA_RETENTION_ARCHIVE_DIR: z.string().default('cold-storage'),
   DATA_PRUNING_CRON: z.string().default('0 2 * * *'),
@@ -171,6 +188,16 @@ function validateEnv(env: NodeJS.ProcessEnv = process.env): Env {
   console.log(`[Telemetry Diagnostics] OTEL_SERVICE_NAME=${result.data.OTEL_SERVICE_NAME}`);
   console.log(`[Telemetry Diagnostics] OTEL_DEBUG=${result.data.OTEL_DEBUG}`);
   console.log(`[Telemetry Diagnostics] LOG_LEVEL=${result.data.LOG_LEVEL}`);
+
+  // Warn if Slack webhook is not configured
+  if (!result.data.SLACK_WEBHOOK_URL) {
+    console.warn('[Startup Warning] SLACK_WEBHOOK_URL is not set — health alerts will not be sent to Slack');
+  }
+
+  // Warn if no TTS provider is configured
+  if (!result.data.ELEVENLABS_API_KEY && !result.data.GOOGLE_TTS_API_KEY) {
+    console.warn('[Startup Warning] No TTS provider configured — TTS features will be unavailable');
+  }
 
   return result.data;
 }

@@ -38,7 +38,7 @@ class AIService {
    * Initialize Google Gemini AI
    */
   private initializeAI(): void {
-    const apiKey = process.env.API_KEY || process.env.GEMINI_API_KEY;
+    const apiKey = process.env.GEMINI_API_KEY;
 
     if (apiKey && apiKey !== 'your_gemini_api_key_here') {
       try {
@@ -68,7 +68,7 @@ class AIService {
     userId?: string,
   ): Promise<GenerateContentResult> {
     if (!this.model) {
-      throw new Error('Gemini AI not initialized. Please configure API_KEY.');
+      throw new Error('Gemini AI not initialized. Please configure GEMINI_API_KEY.');
     }
 
     const jobId = `ai-${Date.now()}`;

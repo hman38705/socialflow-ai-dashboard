@@ -53,10 +53,13 @@ export interface TwitterPostRequest {
  */
 export class TwitterService {
   private readonly API_BASE = 'https://api.twitter.com/2';
-  private readonly bearerToken: string;
 
-  constructor() {
-    this.bearerToken = process.env.TWITTER_BEARER_TOKEN || '';
+  /**
+   * Read bearer token lazily on every access so Kubernetes secret rotation
+   * is picked up without a pod restart.
+   */
+  get bearerToken(): string {
+    return process.env.TWITTER_BEARER_TOKEN || '';
   }
 
   /**

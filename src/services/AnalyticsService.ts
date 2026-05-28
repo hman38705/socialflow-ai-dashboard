@@ -8,6 +8,7 @@
 // ---------------------------------------------------------------------------
 
 export type Platform = 'twitter' | 'linkedin' | 'instagram' | 'tiktok';
+export type Granularity = 'hour' | 'day' | 'week';
 
 /** Normalized analytics record — consistent shape regardless of source platform. */
 export interface PostAnalytics {
@@ -23,6 +24,22 @@ export interface PostAnalytics {
   comments: number;
   /** Unix ms timestamp of last sync */
   syncedAt: number;
+}
+
+/** Aggregated analytics bucket for large date ranges. */
+export interface AggregatedAnalytics {
+  /** Bucket start time (Unix ms) */
+  bucketStart: number;
+  /** Bucket end time (Unix ms) */
+  bucketEnd: number;
+  platform: Platform;
+  /** Sum of all metrics in this bucket */
+  likes: number;
+  shares: number;
+  views: number;
+  comments: number;
+  /** Number of posts in this bucket */
+  postCount: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -314,6 +331,80 @@ const FETCHERS: Record<Platform, Fetcher> = {
 };
 
 // ---------------------------------------------------------------------------
+// Time-bucket aggregation
+// ---------------------------------------------------------------------------
+
+/**
+ * Determine granularity based on date range.
+ * - < 7 days: hourly
+ * - < 90 days: daily
+ * - >= 90 days: weekly
+ */
+function getGranularity(from: number, to: number): Granularity {
+  const rangeMs = to - from;
+  const days = rangeMs / (1000 * 60 * 60 * 24);
+  if (days < 7) return 'hour';
+  if (days < 90) return 'day';
+  return 'week';
+}
+
+/**
+ * Get bucket size in milliseconds.
+ */
+function getBucketSizeMs(granularity: Granularity): number {
+  switch (granularity) {
+    case 'hour': return 60 * 60 * 1000;
+    case 'day': return 24 * 60 * 60 * 1000;
+    case 'week': return 7 * 24 * 60 * 60 * 1000;
+  }
+}
+
+/**
+ * Aggregate analytics records by time bucket.
+ */
+function aggregateByTimeBucket(
+  records: PostAnalytics[],
+  granularity: Granularity,
+  from: number,
+  to: number,
+): AggregatedAnalytics[] {
+  const bucketSizeMs = getBucketSizeMs(granularity);
+  const buckets = new Map<number, AggregatedAnalytics>();
+
+  // Initialize buckets for the entire range
+  for (let bucketStart = from; bucketStart < to; bucketStart += bucketSizeMs) {
+    const bucketEnd = Math.min(bucketStart + bucketSizeMs, to);
+    const key = bucketStart;
+    buckets.set(key, {
+      bucketStart,
+      bucketEnd,
+      platform: records[0]?.platform ?? 'twitter',
+      likes: 0,
+      shares: 0,
+      views: 0,
+      comments: 0,
+      postCount: 0,
+    });
+  }
+
+  // Aggregate records into buckets
+  records.forEach((record) => {
+    const bucketIndex = Math.floor((record.postedAt - from) / bucketSizeMs);
+    const bucketStart = from + bucketIndex * bucketSizeMs;
+    const bucket = buckets.get(bucketStart);
+    if (bucket) {
+      bucket.likes += record.likes;
+      bucket.shares += record.shares;
+      bucket.views += record.views;
+      bucket.comments += record.comments;
+      bucket.postCount += 1;
+    }
+  });
+
+  return Array.from(buckets.values());
+}
+
+// ---------------------------------------------------------------------------
 // AnalyticsService
 // ---------------------------------------------------------------------------
 
@@ -377,6 +468,23 @@ export class AnalyticsService {
     await analyticsDB.init();
     return analyticsDB.getByDateRange(from, to);
   }
-}
+
+  /**
+   * Get aggregated analytics for a date range with automatic granularity.
+   * Returns time-bucketed data to reduce payload size for large date ranges.
+   */
+  async getAggregated(
+    from: number,
+    to: number,
+    platform?: Platform,
+  ): Promise<AggregatedAnalytics[]> {
+    await analyticsDB.init();
+    const records = platform
+      ? await this.getByPlatform(platform).then(r => r.filter(x => x.postedAt >= from && x.postedAt <= to))
+      : await this.getByDateRange(from, to);
+
+    const granularity = getGranularity(from, to);
+    return aggregateByTimeBucket(records, granularity, from, to);
+  }
 
 export const analyticsService = new AnalyticsService();

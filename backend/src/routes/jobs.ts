@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { jobMonitor, JobStatus } from '../services/jobMonitor';
 
 const router = Router();
@@ -245,7 +247,8 @@ router.get('/jobs/:queue/failed', async (req: Request, res: Response) => {
  *       400:
  *         description: Failed to retry
  */
-router.post('/jobs/:queue/jobs/:jobId/retry', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/jobs/:queue/jobs/:jobId/retry', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue, jobId } = req.params;
     const success = await jobMonitor.retryJob(queue, jobId);
@@ -277,7 +280,8 @@ router.post('/jobs/:queue/jobs/:jobId/retry', async (req: Request, res: Response
  *       200:
  *         description: Jobs retried
  */
-router.post('/jobs/:queue/retry-all', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/jobs/:queue/retry-all', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue } = req.params;
     const retried = await jobMonitor.retryAllFailed(queue);
@@ -293,7 +297,8 @@ router.post('/jobs/:queue/retry-all', async (req: Request, res: Response) => {
  * DELETE /jobs/:queue/jobs/:jobId
  * Remove a specific job
  */
-router.delete('/jobs/:queue/jobs/:jobId', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.delete('/jobs/:queue/jobs/:jobId', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue, jobId } = req.params;
     const success = await jobMonitor.removeJob(queue, jobId);
@@ -325,7 +330,8 @@ router.delete('/jobs/:queue/jobs/:jobId', async (req: Request, res: Response) =>
  *       200:
  *         description: Queue paused
  */
-router.post('/jobs/:queue/pause', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/jobs/:queue/pause', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue } = req.params;
     const success = await jobMonitor.pauseQueue(queue);
@@ -357,7 +363,8 @@ router.post('/jobs/:queue/pause', async (req: Request, res: Response) => {
  *       200:
  *         description: Queue resumed
  */
-router.post('/jobs/:queue/resume', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/jobs/:queue/resume', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue } = req.params;
     const success = await jobMonitor.resumeQueue(queue);
@@ -389,7 +396,8 @@ router.post('/jobs/:queue/resume', async (req: Request, res: Response) => {
  *       200:
  *         description: Queue cleared
  */
-router.delete('/jobs/:queue/clear', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.delete('/jobs/:queue/clear', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     const { queue } = req.params;
     const success = await jobMonitor.clearQueue(queue);

@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { replicaClient } from '../lib/readReplica';
 
 /**
@@ -44,7 +46,8 @@ import { replicaClient } from '../lib/readReplica';
  */
 const router = Router();
 
-router.get('/', (_req: Request, res: Response) => {
+// Required permission: analytics:view
+router.get('/', authMiddleware, checkPermission('analytics:view'), (_req: Request, res: Response) => {
   const { platform, from, to } = _req.query;
 
   // Validation

@@ -38,28 +38,8 @@ export interface HashtagGenerationResult {
   };
 }
 
-let aiClient: GoogleGenAI | null = null;
-
-const initializeAiClient = (): GoogleGenAI | null => {
-  if (aiClient !== null) {
-    return aiClient;
-  }
-
-  const apiKey = process.env.API_KEY ?? '';
-  if (!apiKey) {
-    return null;
-  }
-
-  try {
-    aiClient = new GoogleGenAI({ apiKey });
-    return aiClient;
-  } catch (error) {
-    logger.warn('Failed to initialize Gemini client', {
-      error: error instanceof Error ? error.message : String(error),
-    });
-    return null;
-  }
-};
+const apiKey = process.env.GEMINI_API_KEY ?? '';
+const aiClient = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const STOP_WORDS = new Set([
   'a',
@@ -291,9 +271,8 @@ const generateAiHashtags = async (
   maxTags: number,
   heuristic: HashtagGenerationResult,
 ): Promise<string[]> => {
-  const client = initializeAiClient();
-  if (!client) {
-    throw new Error('API_KEY is not configured for AI hashtag generation.');
+  if (!aiClient) {
+    throw new Error('GEMINI_API_KEY is not configured for AI hashtag generation.');
   }
 
   const trendHints =
@@ -302,7 +281,7 @@ const generateAiHashtags = async (
       : 'none';
   const fallbackHints = heuristic.hashtags.join(', ');
 
-  const response = await client.models.generateContent({
+  const response = await aiClient.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [
       'You generate high-performing social media hashtags.',

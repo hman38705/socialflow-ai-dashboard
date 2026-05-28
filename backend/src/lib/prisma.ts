@@ -25,12 +25,31 @@ function buildDatasourceUrl(): string {
   const env = config.NODE_ENV;
   const defaults = POOL_DEFAULTS[env];
 
-  const connectionLimit = config.DB_CONNECTION_LIMIT ?? defaults.connection_limit;
-  const poolTimeout     = config.DB_POOL_TIMEOUT     ?? defaults.pool_timeout;
+  let connectionLimit = config.DB_CONNECTION_LIMIT ?? defaults.connection_limit;
+  const poolTimeout   = config.DB_POOL_TIMEOUT     ?? defaults.pool_timeout;
+
+  // PgBouncer in transaction mode multiplexes server connections, so each
+  // application process must use connection_limit=1 to avoid holding idle
+  // server connections open.
+  if (config.PGBOUNCER_MODE) {
+    if (connectionLimit !== 1) {
+      console.warn(
+        `[prisma] PGBOUNCER_MODE=true detected: overriding connection_limit from ${connectionLimit} to 1. ` +
+        'PgBouncer transaction mode requires connection_limit=1 per process.',
+      );
+    }
+    connectionLimit = 1;
+  }
 
   const url = new URL(base);
   url.searchParams.set('connection_limit', String(connectionLimit));
   url.searchParams.set('pool_timeout',     String(poolTimeout));
+
+  console.log(
+    `[prisma] Effective pool config — connection_limit: ${connectionLimit}, ` +
+    `pool_timeout: ${poolTimeout}s, pgbouncer_mode: ${config.PGBOUNCER_MODE ?? false}`,
+  );
+
   return url.toString();
 }
 

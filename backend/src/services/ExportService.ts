@@ -4,9 +4,11 @@ import { prisma } from '../lib/prisma';
 import { replicaClient } from '../lib/readReplica';
 import { paginatedQuery } from '../lib/paginatedQuery';
 
-function makeStream(res: Response, headers: Record<string, string>, contentLength?: number): Readable {
+function makeStream(res: Response, headers: Record<string, string>): Readable {
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
-  if (contentLength !== undefined) res.setHeader('Content-Length', contentLength);
+  // Use chunked transfer encoding — pre-calculated Content-Length is unreliable
+  // because actual row sizes vary and can cause HTTP clients to truncate the response.
+  res.setHeader('Transfer-Encoding', 'chunked');
   const stream = new Readable({ read() {} });
   stream.pipe(res);
   return stream;
@@ -36,14 +38,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, recordedAt: { gte: startDate, lte: endDate } };
-    const count = await replicaClient.analyticsEntry.count({ where });
     const header = 'id,organizationId,platform,metric,value,recordedAt\n';
-    // Each row: id(~36) + orgId(~36) + platform(~10) + metric(~15) + value(~5) + date(~24) + delimiters ≈ 140 bytes
-    const contentLength = Buffer.byteLength(header) + count * 140;
     const stream = makeStream(res, {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="analytics.csv"',
-    }, contentLength);
+    });
     stream.push(header);
     await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
       `${row.id},"${row.organizationId}","${row.platform}","${row.metric}",${row.value},"${row.recordedAt.toISOString()}"\n`,
@@ -58,14 +57,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, recordedAt: { gte: startDate, lte: endDate } };
-    const count = await replicaClient.analyticsEntry.count({ where });
-    // Each NDJSON row estimate: ~200 bytes
-    const contentLength = count * 200;
     const stream = makeStream(res, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="analytics.jsonl"',
-    }, contentLength);
-    await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
+    });
+    await pump(stream, (args) => prisma.analyticsEntry.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',
     );
   },
@@ -78,14 +74,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, createdAt: { gte: startDate, lte: endDate } };
-    const count = await replicaClient.post.count({ where });
     const header = 'id,organizationId,content,platform,scheduledAt,createdAt\n';
-    // Each row estimate: ~300 bytes (content can vary)
-    const contentLength = Buffer.byteLength(header) + count * 300;
     const stream = makeStream(res, {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="posts.csv"',
-    }, contentLength);
+    });
     stream.push(header);
     await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) => {
       const content = row.content.replace(/"/g, '""');
@@ -101,14 +94,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, createdAt: { gte: startDate, lte: endDate } };
-    const count = await replicaClient.post.count({ where });
-    // Each NDJSON row estimate: ~350 bytes
-    const contentLength = count * 350;
     const stream = makeStream(res, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="posts.jsonl"',
-    }, contentLength);
-    await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) =>
+    });
+    await pump(stream, (args) => prisma.post.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',
     );
   },
