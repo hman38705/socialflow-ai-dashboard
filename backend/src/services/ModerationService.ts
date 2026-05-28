@@ -42,13 +42,23 @@ const THRESHOLDS: Record<SensitivityLevel, number> = {
 
 /**
  * Categories that always result in a hard block regardless of sensitivity.
+ * Extend via MODERATION_ALWAYS_BLOCK_EXTRA (comma-separated) without removing the baseline.
  */
-const ALWAYS_BLOCK = new Set([
+const ALWAYS_BLOCK_BASELINE = new Set([
   'sexual/minors',
   'hate/threatening',
   'violence/graphic',
   'self-harm/instructions',
 ]);
+
+const extraCategories = (process.env.MODERATION_ALWAYS_BLOCK_EXTRA ?? '')
+  .split(',')
+  .map((c) => c.trim())
+  .filter(Boolean);
+
+const ALWAYS_BLOCK = new Set([...ALWAYS_BLOCK_BASELINE, ...extraCategories]);
+
+logger.info('ModerationService always-block list', { categories: [...ALWAYS_BLOCK] });
 
 function getSensitivity(tenantId?: string): SensitivityLevel {
   const tenantVal = tenantId
