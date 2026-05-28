@@ -164,7 +164,7 @@ jobs:
 
       - name: Post coverage summary
         if: always()
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const { loadSummary, formatComment, THRESHOLDS } = await import('${{ github.workspace }}/.github/scripts/post-coverage-comment.mjs');
