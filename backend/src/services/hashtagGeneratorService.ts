@@ -1,4 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('hashtag-generator');
 
 type SupportedPlatform =
   | 'instagram'
@@ -35,8 +38,28 @@ export interface HashtagGenerationResult {
   };
 }
 
-const apiKey = process.env.API_KEY ?? '';
-const aiClient = apiKey ? new GoogleGenAI({ apiKey }) : null;
+let aiClient: GoogleGenAI | null = null;
+
+const initializeAiClient = (): GoogleGenAI | null => {
+  if (aiClient !== null) {
+    return aiClient;
+  }
+
+  const apiKey = process.env.API_KEY ?? '';
+  if (!apiKey) {
+    return null;
+  }
+
+  try {
+    aiClient = new GoogleGenAI({ apiKey });
+    return aiClient;
+  } catch (error) {
+    logger.warn('Failed to initialize Gemini client', {
+      error: error instanceof Error ? error.message : String(error),
+    });
+    return null;
+  }
+};
 
 const STOP_WORDS = new Set([
   'a',
@@ -268,7 +291,8 @@ const generateAiHashtags = async (
   maxTags: number,
   heuristic: HashtagGenerationResult,
 ): Promise<string[]> => {
-  if (!aiClient) {
+  const client = initializeAiClient();
+  if (!client) {
     throw new Error('API_KEY is not configured for AI hashtag generation.');
   }
 
@@ -278,7 +302,7 @@ const generateAiHashtags = async (
       : 'none';
   const fallbackHints = heuristic.hashtags.join(', ');
 
-  const response = await aiClient.models.generateContent({
+  const response = await client.models.generateContent({
     model: 'gemini-2.5-flash',
     contents: [
       'You generate high-performing social media hashtags.',
