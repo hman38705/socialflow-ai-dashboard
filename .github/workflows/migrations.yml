@@ -46,6 +46,17 @@ jobs:
         working-directory: backend
         run: npx prisma generate
 
+      - name: Check migration status
+        working-directory: backend
+        env:
+          DATABASE_URL: postgresql://test:test@localhost:5432/test_db
+        run: |
+          npx prisma migrate status
+          if [ $? -ne 0 ]; then
+            echo "ERROR: There are pending or failed Prisma migrations."
+            exit 1
+          fi
+
       - name: Run migrations
         working-directory: backend
         env:

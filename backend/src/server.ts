@@ -20,6 +20,7 @@ import { Worker } from 'bullmq';
 import { Server } from 'http';
 import { createSmsService } from './services/smsService';
 import { initialize2FaLockoutStore } from './services/TwoFactorLockoutInit';
+import { checkRateLimiterStore } from './middleware/rateLimit';
 
 const logger = createLogger('server');
 const PORT = config.BACKEND_PORT;
@@ -217,6 +218,9 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       authToken: config.TWILIO_AUTH_TOKEN,
       fromNumber: config.TWILIO_FROM_NUMBER,
     });
+
+    // Verify rate-limiter Redis store is reachable (#916)
+    await checkRateLimiterStore(doExit);
 
     // Initialize 2FA lockout store with Redis backend (#610)
     try {

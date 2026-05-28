@@ -21,6 +21,8 @@ export interface JobState {
 interface UseJobStreamOptions {
   /** Called on every job_progress event */
   onProgress?: (event: JobProgressEvent) => void;
+  /** Called when a job transitions to the failed state */
+  onJobFailed?: (event: JobProgressEvent) => void;
   /** Base URL — defaults to '' (same origin) */
   baseUrl?: string;
 }
@@ -37,7 +39,7 @@ export function useJobStream(token: string | null, options: UseJobStreamOptions 
   const esRef = useRef<EventSource | null>(null);
   const retryRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const retryDelay = useRef(1000);
-  const { onProgress, baseUrl = '' } = options;
+  const { onProgress, onJobFailed, baseUrl = '' } = options;
 
   const connect = useCallback(() => {
     if (!token) return;
@@ -58,6 +60,22 @@ export function useJobStream(token: string | null, options: UseJobStreamOptions 
         const event: JobProgressEvent = JSON.parse(e.data as string);
         setJobs((prev: JobState) => ({ ...prev, [event.jobId]: event }));
         onProgress?.(event);
+        if (event.status === 'failed') {
+          onJobFailed?.(event);
+        }
+      } catch {
+        // malformed event — ignore
+      }
+    });
+
+    // Handle explicit 'failed' SSE event type emitted by the backend
+    es.addEventListener('failed', (e: MessageEvent) => {
+      try {
+        const event: JobProgressEvent = JSON.parse(e.data as string);
+        const failedEvent: JobProgressEvent = { ...event, status: 'failed' };
+        setJobs((prev: JobState) => ({ ...prev, [failedEvent.jobId]: failedEvent }));
+        onProgress?.(failedEvent);
+        onJobFailed?.(failedEvent);
       } catch {
         // malformed event — ignore
       }
@@ -73,7 +91,7 @@ export function useJobStream(token: string | null, options: UseJobStreamOptions 
       retryDelay.current = delay * 2;
       retryRef.current = setTimeout(connect, delay);
     };
-  }, [token, baseUrl, onProgress]);
+  }, [token, baseUrl, onProgress, onJobFailed]);
 
   useEffect(() => {
     connect();
@@ -91,5 +109,24 @@ export function useJobStream(token: string | null, options: UseJobStreamOptions 
     });
   }, []);
 
-  return { jobs, connected, clearJob };
+  /**
+   * Re-enqueue a failed job by POSTing to the backend retry endpoint.
+   * Clears the local failed state so the UI shows a fresh pending entry.
+   */
+  const retryJob = useCallback(
+    async (jobId: string): Promise<void> => {
+      if (!token) return;
+      setJobs((prev: JobState) => {
+        if (!prev[jobId]) return prev;
+        return { ...prev, [jobId]: { ...prev[jobId], status: 'pending', progress: 0, error: undefined } };
+      });
+      await fetch(`${baseUrl}/api/v1/jobs/${encodeURIComponent(jobId)}/retry`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    },
+    [token, baseUrl],
+  );
+
+  return { jobs, connected, clearJob, retryJob };
 }
