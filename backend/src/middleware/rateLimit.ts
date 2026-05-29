@@ -1,6 +1,9 @@
 import rateLimit, { Options, RateLimitRequestHandler } from 'express-rate-limit';
 import { Request, Response } from 'express';
 import { getRedisConnection } from '../config/runtime';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('rate-limit');
 
 // ---------------------------------------------------------------------------
 // Optional Redis store — only loaded in production to keep dev simple
@@ -26,8 +29,17 @@ async function buildStore() {
 // ---------------------------------------------------------------------------
 // Shared handler — returns a consistent 429 JSON body
 // ---------------------------------------------------------------------------
-const handler = (_req: Request, res: Response): void => {
+const handler = (req: Request, res: Response): void => {
   const retryAfter = Math.ceil(Number(res.getHeader('Retry-After') ?? 60));
+
+  logger.warn('rate_limit_exceeded', {
+    ip:        req.ip ?? (req.socket as { remoteAddress?: string })?.remoteAddress ?? 'unknown',
+    path:      req.path,
+    method:    req.method,
+    userAgent: req.headers['user-agent'] ?? '',
+    userId:    (req as Request & { user?: { id?: string } }).user?.id ?? null,
+    retryAfter,
+  });
 
   res.status(429).json({
     success: false,
