@@ -31,6 +31,7 @@ export function audit(
         auditLogger.log({
           actorId: req.userId ?? 'anonymous',
           action,
+          organizationId: req.activeOrgId,
           resourceType,
           resourceId: resourceId?.(req),
           metadata: rawMetadata ? redactSensitiveFields(rawMetadata) : undefined,

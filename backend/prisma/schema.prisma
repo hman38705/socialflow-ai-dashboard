@@ -106,17 +106,19 @@ model DynamicConfig {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String
-  action     String
-  resource   String?
-  resourceId String?
-  metadata   Json?
-  ipAddress  String?
-  userAgent  String?
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  action         String
+  organizationId String?
+  resource       String?
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
   @@index([resource, resourceId])
 }
 
