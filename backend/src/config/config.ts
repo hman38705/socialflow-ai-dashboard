@@ -84,6 +84,7 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
 
   ELASTICSEARCH_URL: z.string().url('ELASTICSEARCH_URL must be a valid URL').optional(),
+  ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED: z.string().optional(),
   LOG_LEVEL: z.enum(['error', 'warn', 'info', 'http', 'verbose', 'debug', 'silly']).default('info'),
 
   // ── Alerting ──────────────────────────────────────────────────────────────
@@ -157,6 +158,15 @@ const envSchema = z.object({
 
   // ── AWS S3 ────────────────────────────────────────────────────────────────
   S3_PRESIGNED_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
+}).superRefine((data, ctx) => {
+  if (data.NODE_ENV === 'production' && data.ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED === 'false') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED'],
+      message:
+        'ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED cannot be "false" in production — disabling TLS verification exposes Elasticsearch traffic to MITM attacks',
+    });
+  }
 });
 
 export type Env = z.infer<typeof envSchema>;
