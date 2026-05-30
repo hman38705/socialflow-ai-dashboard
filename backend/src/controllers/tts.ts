@@ -18,9 +18,9 @@ export async function createTTSJob(req: AuthRequest, res: Response, next: NextFu
   }
 }
 
-export function getTTSJob(req: AuthRequest, res: Response, next: NextFunction) {
+export async function getTTSJob(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const job = ttsService.getJob(req.params.jobId);
+    const job = await ttsService.getJob(req.params.jobId);
     if (!job) throw new NotFoundError('TTS job not found');
     res.json(job);
   } catch (err) {
@@ -28,9 +28,9 @@ export function getTTSJob(req: AuthRequest, res: Response, next: NextFunction) {
   }
 }
 
-export function listTTSJobs(_req: AuthRequest, res: Response, next: NextFunction) {
+export async function listTTSJobs(_req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    res.json(ttsService.getAllJobs());
+    res.json(await ttsService.getAllJobs());
   } catch (err) {
     next(err);
   }
