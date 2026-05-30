@@ -76,7 +76,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Audit all workspace dependencies
+      - name: Audit root workspace dependencies
+        run: npm audit --audit-level=high
+
+      - name: Audit backend dependencies
+        working-directory: backend
         run: npm audit --audit-level=high
 
       - name: Detect Snyk token availability
