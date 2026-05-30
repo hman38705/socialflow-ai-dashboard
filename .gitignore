@@ -68,3 +68,7 @@ somzilla.md
 
 # OS
 Thumbs.db
+
+# Kubernetes secrets
+k8s/base/secret.yaml
+k8s/overlays/*/secret.yaml

@@ -6,7 +6,7 @@ resources:
   - role.yaml
   - rolebinding.yaml
   - configmap.yaml
-  - secret.yaml
+  - external-secret.yaml
   - deployment.yaml
   - service.yaml
   - hpa.yaml
