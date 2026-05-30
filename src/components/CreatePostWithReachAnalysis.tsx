@@ -12,6 +12,14 @@ const PLATFORM_CHAR_LIMITS: Record<Platform, number> = {
   [Platform.INSTAGRAM]: 2200,
 };
 
+// Per-platform file size limits in bytes (image / video)
+const PLATFORM_FILE_SIZE_LIMITS: Record<Platform, { image: number; video: number }> = {
+  [Platform.TWITTER]:   { image: 5 * 1024 * 1024,   video: 512 * 1024 * 1024 },
+  [Platform.LINKEDIN]:  { image: 10 * 1024 * 1024,  video: 200 * 1024 * 1024 },
+  [Platform.FACEBOOK]:  { image: 10 * 1024 * 1024,  video: 4 * 1024 * 1024 * 1024 },
+  [Platform.INSTAGRAM]: { image: 8 * 1024 * 1024,   video: 100 * 1024 * 1024 },
+};
+
 const MaterialIcon = ({ name, className }: { name: string, className?: string }) => (
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
 );
@@ -24,6 +32,32 @@ export const CreatePostWithReachAnalysis: React.FC<ViewProps> = ({ onNavigate })
   const [scheduleDate, setScheduleDate] = useState('');
   const [scheduleTime, setScheduleTime] = useState('10:00');
   const [showReachAnalysis, setShowReachAnalysis] = useState(true);
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileSizeErrors, setFileSizeErrors] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0] ?? null;
+    setSelectedFile(file);
+    setFileSizeErrors([]);
+
+    if (!file) return;
+
+    const fileKind = file.type.startsWith('video/') ? 'video' : 'image';
+    const errors: string[] = [];
+
+    for (const platform of selectedPlatforms) {
+      const limit = PLATFORM_FILE_SIZE_LIMITS[platform]?.[fileKind];
+      if (limit !== undefined && file.size > limit) {
+        const limitMB = (limit / (1024 * 1024)).toFixed(0);
+        errors.push(
+          `${platform}: ${fileKind} exceeds the ${limitMB} MB limit (${(file.size / (1024 * 1024)).toFixed(1)} MB)`,
+        );
+      }
+    }
+
+    setFileSizeErrors(errors);
+  };
 
   // Extract hashtags from caption
   useEffect(() => {
@@ -143,6 +177,32 @@ export const CreatePostWithReachAnalysis: React.FC<ViewProps> = ({ onNavigate })
             </div>
           </Card>
 
+          {/* Media Upload */}
+          {(mediaType === 'image' || mediaType === 'video' || mediaType === 'carousel') && (
+            <Card>
+              <h3 className="text-sm font-medium text-gray-subtext mb-3">Upload Media</h3>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept={mediaType === 'video' ? 'video/*' : 'image/*'}
+                onChange={handleFileChange}
+                className="block w-full text-sm text-gray-subtext file:mr-4 file:py-2 file:px-4 file:rounded-xl file:border-0 file:text-sm file:font-medium file:bg-primary-blue file:text-white hover:file:bg-blue-700 cursor-pointer"
+              />
+              {selectedFile && fileSizeErrors.length === 0 && (
+                <p className="mt-2 text-xs text-green-400">
+                  {selectedFile.name} ({(selectedFile.size / (1024 * 1024)).toFixed(1)} MB) — within limits for all selected platforms
+                </p>
+              )}
+              {fileSizeErrors.length > 0 && (
+                <ul className="mt-2 space-y-1">
+                  {fileSizeErrors.map((err) => (
+                    <li key={err} className="text-xs text-red-400">{err}</li>
+                  ))}
+                </ul>
+              )}
+            </Card>
+          )}
+
           {/* Caption */}
           <Card>
             <h3 className="text-lg font-semibold text-white mb-4">Caption</h3>
@@ -219,10 +279,14 @@ export const CreatePostWithReachAnalysis: React.FC<ViewProps> = ({ onNavigate })
           </Card>
 
           <button 
-            disabled={isOverLimit}
+            disabled={isOverLimit || fileSizeErrors.length > 0}
             className="w-full bg-primary-blue text-white px-6 py-3 rounded-2xl text-sm font-medium hover:bg-blue-700 shadow-lg shadow-blue-500/20 transition-all disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary-blue"
           >
-            {isOverLimit ? `Over character limit (${overLimitPlatforms.map(p => p.platform).join(', ')})` : 'Schedule Post'}
+            {isOverLimit
+              ? `Over character limit (${overLimitPlatforms.map(p => p.platform).join(', ')})`
+              : fileSizeErrors.length > 0
+              ? 'File exceeds platform size limit'
+              : 'Schedule Post'}
           </button>
         </div>
 

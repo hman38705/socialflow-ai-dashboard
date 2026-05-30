@@ -9,7 +9,6 @@ lerna-debug.log*
 
 # Dependencies
 node_modules/
-package-lock.json/
 
 # Build outputs
 dist
@@ -52,6 +51,7 @@ junit.xml
 *.njsproj
 *.sln
 *.sw?
+Thumbs.db
 
 # Project Tracking
 tasks.md
@@ -72,6 +72,14 @@ backend/uploads/
 !*.tfvars.example
 .terraform/
 .terraform.lock.hcl
+
+# Project Tracking
+somzilla.md
+
+# OS
+.DS_Store
+desktop.ini
+Thumbs.db
 
 # Temporary files
 tmp/

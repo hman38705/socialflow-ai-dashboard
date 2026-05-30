@@ -247,15 +247,18 @@ export class TwitterService {
   // ─── PKCE helpers ──────────────────────────────────────────────────────────
 
   /**
-   * Store a PKCE code_challenge keyed by state, to be verified on callback.
+   * Store a PKCE code_challenge keyed by both state and userId so the
+   * challenge is bound to the initiating user's session, preventing OAuth
+   * flow hijacking by a different user reusing the same state value.
    */
-  public async storePkceChallenge(state: string, codeChallenge: string): Promise<void> {
-    await getRedis().set(`${PKCE_CHALLENGE_PREFIX}${state}`, codeChallenge, 'EX', PKCE_TTL_SECONDS);
+  public async storePkceChallenge(state: string, codeChallenge: string, userId: string): Promise<void> {
+    const key = `${PKCE_CHALLENGE_PREFIX}${userId}:${state}`;
+    await getRedis().set(key, codeChallenge, 'EX', PKCE_TTL_SECONDS);
   }
 
   /**
    * Exchange an authorisation code for tokens, verifying the PKCE code_verifier
-   * against the stored code_challenge for the given state.
+   * against the stored code_challenge for the given state and userId.
    *
    * Throws if the verifier is missing, the challenge is not found, or they do not match.
    */
@@ -265,10 +268,11 @@ export class TwitterService {
     codeVerifier: string,
     clientId: string,
     redirectUri: string,
+    userId: string,
   ): Promise<{ accessToken: string; refreshToken: string; expiresAt: number }> {
     // Retrieve and immediately delete the stored challenge (one-time use)
     const redis = getRedis();
-    const key = `${PKCE_CHALLENGE_PREFIX}${state}`;
+    const key = `${PKCE_CHALLENGE_PREFIX}${userId}:${state}`;
     const storedChallenge = await redis.getdel(key);
 
     if (!storedChallenge) {

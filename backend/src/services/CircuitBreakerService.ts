@@ -7,8 +7,10 @@ import {
   FALLBACK_STRATEGIES,
 } from '../config/circuitBreaker.config';
 import { createLogger } from '../lib/logger';
+import { createNotificationManager } from './notificationProvider';
 
 const logger = createLogger('circuit-breaker');
+const notificationManager = createNotificationManager();
 
 /**
  * Circuit Breaker State
@@ -184,6 +186,14 @@ class CircuitBreakerService {
   private setupEventListeners(breaker: CircuitBreaker, serviceName: string): void {
     breaker.on('open', () => {
       logger.warn(`Circuit breaker OPENED for ${serviceName}`);
+      notificationManager.sendAlert({
+        severity: 'critical',
+        service: serviceName,
+        message: `Circuit breaker opened for ${serviceName} — requests are being rejected`,
+        timestamp: new Date().toISOString(),
+      }).catch((err) => {
+        logger.error(`Failed to send circuit breaker open alert for ${serviceName}: ${err instanceof Error ? err.message : String(err)}`);
+      });
     });
 
     breaker.on('halfOpen', () => {

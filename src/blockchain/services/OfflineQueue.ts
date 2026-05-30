@@ -12,20 +12,28 @@ interface QueuedTransaction {
 export class OfflineQueue {
   private readonly QUEUE_KEY = 'stellar:offline:queue';
   private readonly QUEUE_TTL = 7 * 24 * 60 * 60; // 7 days in seconds
+  private readonly MAX_QUEUE_SIZE: number;
   private redis: any;
   private inMemoryQueue: QueuedTransaction[] = [];
 
-  constructor(redisClient?: any) {
+  constructor(redisClient?: any, maxQueueSize = 1000) {
     this.redis = redisClient;
+    this.MAX_QUEUE_SIZE = maxQueueSize;
     if (!this.redis) {
       console.warn('OfflineQueue: Redis client not provided, using in-memory storage only');
     }
   }
 
   /**
-   * Queue a transaction for offline submission
+   * Queue a transaction for offline submission.
+   * Throws if the queue has reached MAX_QUEUE_SIZE.
    */
   async queueTransaction(xdr: string): Promise<string> {
+    const currentSize = await this.getQueueSize();
+    if (currentSize >= this.MAX_QUEUE_SIZE) {
+      throw new Error(`Offline queue is full (max ${this.MAX_QUEUE_SIZE} transactions)`);
+    }
+
     const id = `tx_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const transaction: QueuedTransaction = {
       id,

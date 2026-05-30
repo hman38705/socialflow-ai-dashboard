@@ -2,7 +2,7 @@
 import StellarSdk from '@stellar/stellar-sdk';
 const { Server, TransactionBuilder, Asset, Operation, Transaction, FeeBumpTransaction } = StellarSdk;
 import { NetworkConfig, DEFAULT_NETWORK } from '../config/networks';
-import { OfflineQueue } from './OfflineQueue.ts';
+import { OfflineQueue } from './OfflineQueue';
 import { AppError } from '../../utils/AppError';
 import { ErrorCode } from '../../constants/ErrorCodes';
 
@@ -31,8 +31,20 @@ export class StellarService {
   }
 
   // --- 2.2 Connection Management ---
+  // Fallback Horizon endpoints provide real redundancy; primary URL is always first.
+  private static readonly FALLBACK_HORIZON_URLS = [
+    'https://horizon.stellar.org',
+    'https://horizon-testnet.stellar.org',
+    'https://horizon-futurenet.stellar.org',
+  ];
+
   private initializePool(horizonUrl: string): typeof Server[] {
-    return [new Server(horizonUrl), new Server(horizonUrl), new Server(horizonUrl)];
+    // Build a deduplicated list: primary URL first, then distinct fallbacks.
+    const urls = [
+      horizonUrl,
+      ...StellarService.FALLBACK_HORIZON_URLS.filter((u) => u !== horizonUrl),
+    ].slice(0, 3);
+    return urls.map((u) => new Server(u));
   }
 
   private getServer(): typeof Server {

@@ -36,6 +36,63 @@ type Action =
   | { type: 'REPLAY_START'; webhookId: string; deliveryId: string }
   | { type: 'REPLAY_END'; webhookId: string; deliveryId: string };
 
+// ── One-time secret modal ─────────────────────────────────────────────────────
+
+function OneTimeSecretModal({ secret, onClose }: { secret: string; onClose: () => void }) {
+  const [copied, setCopied] = useState(false);
+
+  async function handleCopy() {
+    await navigator.clipboard.writeText(secret);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="secret-modal-title"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+    >
+      <div className="w-full max-w-lg rounded-xl bg-white p-6 shadow-2xl space-y-4">
+        <div>
+          <h3 id="secret-modal-title" className="text-base font-semibold text-gray-900">
+            Webhook Signing Secret
+          </h3>
+          <p className="mt-1 text-sm text-amber-600">
+            Copy this secret now — it will not be shown again.
+          </p>
+        </div>
+
+        <div className="rounded-lg border bg-gray-50 px-4 py-3 font-mono text-sm break-all text-gray-800 select-all">
+          {secret}
+        </div>
+
+        <div className="flex gap-3">
+          <button
+            onClick={handleCopy}
+            className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-semibold text-white hover:bg-blue-500"
+          >
+            {copied ? '✓ Copied!' : 'Copy to Clipboard'}
+          </button>
+          <button
+            onClick={onClose}
+            className="flex-1 rounded-lg border px-4 py-2 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            I&apos;ve Saved It
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function generateSecret(): string {
+  const bytes = new Uint8Array(32);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case 'LOAD_START':  return { ...state, loading: true, error: null };
@@ -192,15 +249,14 @@ function WebhookRow({ webhook, deliveries, expanded, onExpand, onDelete, onTest,
 // ── Create form ───────────────────────────────────────────────────────────────
 
 interface CreateFormProps {
-  onCreated: (w: WebhookSubscription) => void;
+  onCreated: (w: WebhookSubscription, secret: string) => void;
 }
 
 function CreateForm({ onCreated }: CreateFormProps) {
-  const [url, setUrl]       = useState('');
-  const [secret, setSecret] = useState('');
+  const [url, setUrl]     = useState('');
   const [events, setEvents] = useState<WebhookEventType[]>([]);
-  const [busy, setBusy]     = useState(false);
-  const [err, setErr]       = useState<string | null>(null);
+  const [busy, setBusy]   = useState(false);
+  const [err, setErr]     = useState<string | null>(null);
 
   function toggleEvent(e: WebhookEventType) {
     setEvents(prev => prev.includes(e) ? prev.filter(x => x !== e) : [...prev, e]);
@@ -208,16 +264,18 @@ function CreateForm({ onCreated }: CreateFormProps) {
 
   async function handleSubmit(ev: React.FormEvent) {
     ev.preventDefault();
-    if (!url || events.length === 0 || !secret) {
-      setErr('URL, secret, and at least one event are required.');
+    if (!url || events.length === 0) {
+      setErr('URL and at least one event are required.');
       return;
     }
     setBusy(true);
     setErr(null);
     try {
+      // Generate a secure random secret — shown once to the user after creation
+      const secret = generateSecret();
       const created = await WebhooksService.createWebhook({ url, secret, events });
-      onCreated(created);
-      setUrl(''); setSecret(''); setEvents([]);
+      onCreated(created, secret);
+      setUrl(''); setEvents([]);
     } catch (e: any) {
       setErr(e?.message ?? 'Failed to create webhook.');
     } finally {
@@ -235,14 +293,6 @@ function CreateForm({ onCreated }: CreateFormProps) {
                placeholder="https://example.com/webhook"
                className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
                required />
-      </div>
-
-      <div className="space-y-1">
-        <label className="text-xs text-gray-600" htmlFor="wh-secret">Signing Secret (min 16 chars)</label>
-        <input id="wh-secret" type="password" value={secret} onChange={e => setSecret(e.target.value)}
-               placeholder="••••••••••••••••"
-               className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400"
-               required minLength={16} />
       </div>
 
       <fieldset>
@@ -321,7 +371,8 @@ export default function WebhookManager() {
   const [state, dispatch] = useReducer(reducer, {
     webhooks: [], loading: false, error: null, deliveries: {}, expandedId: null, replayingDeliveries: new Set(),
   });
-  const [testingId, setTestingId] = useState<string | null>(null);
+  const [testingId, setTestingId]       = useState<string | null>(null);
+  const [pendingSecret, setPendingSecret] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     dispatch({ type: 'LOAD_START' });
@@ -380,7 +431,7 @@ export default function WebhookManager() {
         </button>
       </div>
 
-      <CreateForm onCreated={w => dispatch({ type: 'ADD', webhook: w })} />
+      <CreateForm onCreated={(w, secret) => { dispatch({ type: 'ADD', webhook: w }); setPendingSecret(secret); }} />
 
       {state.loading && <p className="text-sm text-gray-500">Loading…</p>}
       {state.error   && <p className="text-sm text-red-600" role="alert">{state.error}</p>}
@@ -407,6 +458,10 @@ export default function WebhookManager() {
 
       {testingId && (
         <TestModal webhookId={testingId} onClose={() => setTestingId(null)} />
+      )}
+
+      {pendingSecret && (
+        <OneTimeSecretModal secret={pendingSecret} onClose={() => setPendingSecret(null)} />
       )}
     </section>
   );

@@ -178,6 +178,8 @@ class LinkedInService {
           'INVALID_PAYLOAD',
         );
       }
+
+      await this.validateMediaAssetUrls(request.mediaAssets);
     }
 
     return circuitBreakerService.execute(
@@ -218,6 +220,31 @@ class LinkedInService {
       async () => {
         throw new Error('LinkedIn API temporarily unavailable. Post has been queued for retry.');
       },
+    );
+  }
+
+  private async validateMediaAssetUrls(mediaAssets: LinkedInMediaAsset[]): Promise<void> {
+    await Promise.all(
+      mediaAssets.map(async (asset) => {
+        let response: Response;
+        try {
+          response = await fetch(asset.url, { method: 'HEAD' });
+        } catch {
+          throw new ValidationError(
+            `LinkedIn image URL is not publicly accessible: ${asset.url}`,
+            undefined,
+            'INVALID_MEDIA_ASSET',
+          );
+        }
+
+        if (!response.ok) {
+          throw new ValidationError(
+            `LinkedIn image URL is not publicly accessible: ${asset.url} returned ${response.status}`,
+            undefined,
+            'INVALID_MEDIA_ASSET',
+          );
+        }
+      }),
     );
   }
 

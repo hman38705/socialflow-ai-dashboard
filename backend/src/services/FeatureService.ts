@@ -1,5 +1,5 @@
 import { createLogger } from '../lib/logger';
-import { dynamicConfigService } from './DynamicConfigService';
+import { DynamicConfigService, getDynamicConfigService } from './DynamicConfigService';
 
 const logger = createLogger('feature-service');
 
@@ -34,6 +34,15 @@ export interface FeatureContext {
 const FLAG_PREFIX = 'FEATURE_FLAG:';
 
 export class FeatureService {
+  private _svcPromise: Promise<import('./DynamicConfigService').DynamicConfigService> | null = null;
+
+  private async getSvc(): Promise<import('./DynamicConfigService').DynamicConfigService> {
+    if (!this._svcPromise) {
+      this._svcPromise = getDynamicConfigService();
+    }
+    return this._svcPromise;
+  }
+
   /**
    * Check if a feature is enabled for the given context.
    *
@@ -79,7 +88,8 @@ export class FeatureService {
    */
   async setFlag(flagName: string, flag: FeatureFlag): Promise<void> {
     const key = `${FLAG_PREFIX}${flagName}`;
-    await dynamicConfigService.set(key, flag, 'json', flag.description);
+    const svc = await this.getSvc();
+    await svc.set(key, flag, 'json', flag.description);
     logger.info('Feature flag updated', { flagName, flag });
   }
 
@@ -96,7 +106,9 @@ export class FeatureService {
    * Return all known feature flags from the config cache.
    */
   listFlags(): Record<string, FeatureFlag> {
-    const status = dynamicConfigService.getStatus();
+    const svc = DynamicConfigService.getCachedInstance();
+    if (!svc) return {};
+    const status = svc.getStatus();
     const result: Record<string, FeatureFlag> = {};
 
     for (const key of status.cachedKeys) {
@@ -116,7 +128,14 @@ export class FeatureService {
 
   private getFlag(flagName: string): FeatureFlag | null {
     const key = `${FLAG_PREFIX}${flagName}`;
-    const value = dynamicConfigService.get<FeatureFlag | null>(key, null);
+    // The DynamicConfigService cache is populated eagerly at startup,
+    // so by the time this is called the cache is already built.
+    // We call getDynamicConfigService() to ensure the singleton is initialized,
+    // then read synchronously from the cached instance.
+    // At runtime the service is already resolved due to module loading order.
+    const svc = DynamicConfigService.getCachedInstance();
+    if (!svc) return null;
+    const value = svc.get<FeatureFlag | null>(key, null);
     if (!value || typeof value !== 'object') return null;
     return value as FeatureFlag;
   }

@@ -36,6 +36,7 @@ export interface AuditLog {
   id: string;
   actorId: string; // userId who performed the action
   action: AuditAction;
+  organizationId?: string; // org context in which the action was performed
   resourceType?: string; // e.g. "post", "user", "organization"
   resourceId?: string; // ID of the affected resource
   metadata?: Record<string, unknown>;

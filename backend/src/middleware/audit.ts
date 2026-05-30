@@ -28,12 +28,17 @@ export function audit(
       // Only log on successful (2xx) responses
       if (res.statusCode >= 200 && res.statusCode < 300) {
         const rawMetadata = metadata?.(req);
+        const enrichedMetadata: Record<string, unknown> = {
+          ...(rawMetadata ?? {}),
+          ...(req.activeOrgId ? { orgId: req.activeOrgId } : {}),
+        };
         auditLogger.log({
           actorId: req.user?.id ?? 'anonymous',
           action,
+          organizationId: req.activeOrgId,
           resourceType,
           resourceId: resourceId?.(req),
-          metadata: rawMetadata ? redactSensitiveFields(rawMetadata) : undefined,
+          metadata: redactSensitiveFields(enrichedMetadata),
           ip: req.ip,
           userAgent: req.headers['user-agent'],
         });
