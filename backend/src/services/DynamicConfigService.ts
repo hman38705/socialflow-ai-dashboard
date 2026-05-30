@@ -44,13 +44,20 @@ export class DynamicConfigService {
 
   /**
    * Starts periodic polling of the database for configuration changes.
+   * Polling is disabled in the test environment to avoid DB noise.
+   * A ±20% jitter is applied to the interval to prevent thundering herd
+   * when multiple replicas start simultaneously.
    */
   public startPolling(): void {
     if (this.pollingInterval) return;
+    if (process.env.NODE_ENV === 'test') return;
+
+    const jitter = this.refreshIntervalMs * 0.2 * (Math.random() * 2 - 1); // ±20%
+    const interval = this.refreshIntervalMs + jitter;
 
     this.pollingInterval = setInterval(async () => {
       await this.refreshCache();
-    }, this.refreshIntervalMs);
+    }, interval);
   }
 
   /**

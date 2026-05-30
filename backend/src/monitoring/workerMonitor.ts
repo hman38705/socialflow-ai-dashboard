@@ -90,6 +90,7 @@ const DEFAULT_RESTART_BACKOFF_BASE_MS = 1000;
 const DEFAULT_RESTART_BACKOFF_MAX_MS = 60000;
 const HOUR_MS = 60 * 60 * 1000;
 const RESTART_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes to reset consecutive counter
+const MAX_BACKOFF_MS = 5 * 60 * 1000; // hard cap: never wait more than 5 minutes between restarts
 
 export class WorkerMonitor {
   private readonly options: Required<Omit<WorkerMonitorOptions, 'connection'>> & {
@@ -485,10 +486,11 @@ export class WorkerMonitor {
       worker.consecutiveRestarts = 0;
     }
 
-    // Calculate exponential backoff delay
+    // Calculate exponential backoff delay, capped at MAX_BACKOFF_MS regardless of configuration
     const backoffDelay = Math.min(
       Math.pow(2, worker.consecutiveRestarts) * this.options.restartBackoffBaseMs,
       this.options.restartBackoffMaxMs,
+      MAX_BACKOFF_MS,
     );
 
     if (backoffDelay > 0) {
