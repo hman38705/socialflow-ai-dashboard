@@ -242,31 +242,48 @@ class YouTubeService {
     );
   }
 
-  /** List the most recent videos for the authenticated channel */
+  /** List all videos for the authenticated channel, paginating through all pages */
   public async listChannelVideos(
     accessToken: string,
-    maxResults = 25,
+    pageDelayMs = 500,
   ): Promise<string[] | DegradedResponse<string[]>> {
     return circuitBreakerService.execute(
       'youtube',
       async () => {
-        const params = new URLSearchParams({
-          part: 'id',
-          forMine: 'true',
-          type: 'video',
-          maxResults: String(maxResults),
-        });
-        const response = await fetch(`${API_BASE}/search?${params}`, {
-          headers: { Authorization: `Bearer ${accessToken}` },
-        });
+        const allVideoIds: string[] = [];
+        let pageToken: string | undefined;
 
-        if (!response.ok) {
-          const body = await response.json().catch(() => ({}));
-          handleYouTubeError(response.status, body);
-        }
+        do {
+          const params = new URLSearchParams({
+            part: 'id',
+            forMine: 'true',
+            type: 'video',
+            maxResults: '50',
+          });
+          if (pageToken) params.set('pageToken', pageToken);
 
-        const data = (await response.json()) as any;
-        return (data.items ?? []).map((item: any) => item.id.videoId as string);
+          const response = await fetch(`${API_BASE}/search?${params}`, {
+            headers: { Authorization: `Bearer ${accessToken}` },
+          });
+
+          if (!response.ok) {
+            const body = await response.json().catch(() => ({}));
+            handleYouTubeError(response.status, body);
+          }
+
+          const data = (await response.json()) as any;
+          const ids = (data.items ?? []).map((item: any) => item.id.videoId as string);
+          allVideoIds.push(...ids);
+
+          pageToken = data.nextPageToken;
+
+          if (pageToken) {
+            await new Promise((r) => setTimeout(r, pageDelayMs));
+          }
+        } while (pageToken);
+
+        logger.info('YouTube channel videos listed', { totalCount: allVideoIds.length });
+        return allVideoIds;
       },
       async () => {
         logger.warn('YouTube circuit breaker open, returning degraded video list');
