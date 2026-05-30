@@ -1,5 +1,5 @@
 import { createLogger } from '../lib/logger';
-import { dynamicConfigService, ConfigKey } from './DynamicConfigService';
+import { DynamicConfigService, ConfigKey } from './DynamicConfigService';
 
 const logger = createLogger('moderation-service');
 
@@ -61,8 +61,9 @@ const ALWAYS_BLOCK = new Set([...ALWAYS_BLOCK_BASELINE, ...extraCategories]);
 logger.info('ModerationService always-block list', { categories: [...ALWAYS_BLOCK] });
 
 function getSensitivity(tenantId?: string): SensitivityLevel {
-  const tenantVal = tenantId
-    ? dynamicConfigService.get<string>(`tenant:${tenantId}:${ConfigKey.MODERATION_SENSITIVITY}`)
+  const svc = DynamicConfigService.getCachedInstance();
+  const tenantVal = tenantId && svc
+    ? svc.get<string>(`tenant:${tenantId}:${ConfigKey.MODERATION_SENSITIVITY}`)
     : null;
   const val = (tenantVal ?? process.env.MODERATION_SENSITIVITY ?? 'medium').toLowerCase();
   if (val === 'low' || val === 'high') return val;

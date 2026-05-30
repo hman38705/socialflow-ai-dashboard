@@ -9,8 +9,8 @@ describe('DynamicConfigService – poll interval', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
 
-  it('uses the provided interval (default 60 000 ms)', () => {
-    const svc = new DynamicConfigService(60000);
+  it('uses the provided interval (default 60 000 ms)', async () => {
+    const svc = await DynamicConfigService.create(60000);
     const refreshSpy = jest.spyOn(svc as any, 'refreshCache').mockResolvedValue(undefined);
 
     svc.stopPolling();
@@ -26,8 +26,8 @@ describe('DynamicConfigService – poll interval', () => {
     svc.stopPolling();
   });
 
-  it('respects a custom interval passed to the constructor', () => {
-    const svc = new DynamicConfigService(5000);
+  it('respects a custom interval passed to the factory', async () => {
+    const svc = await DynamicConfigService.create(5000);
     const refreshSpy = jest.spyOn(svc as any, 'refreshCache').mockResolvedValue(undefined);
 
     svc.stopPolling();
@@ -44,13 +44,23 @@ describe('DynamicConfigService – poll interval', () => {
     svc.stopPolling();
   });
 
+  it('cache is populated before create() resolves', async () => {
+    const mockFindMany = jest.fn().mockResolvedValue([
+      { key: 'testKey', value: 'testValue', type: 'string' },
+    ]);
+    (require('../../lib/prisma').prisma.dynamicConfig.findMany as jest.Mock).mockImplementation(
+      mockFindMany,
+    );
+
+    const svc = await DynamicConfigService.create();
+
+    expect(svc.get('testKey')).toBe('testValue');
+  });
+
   it('reads DYNAMIC_CONFIG_POLL_INTERVAL_MS from env via config', () => {
-    // The singleton is constructed with config.DYNAMIC_CONFIG_POLL_INTERVAL_MS.
-    // We verify the env var is wired up by checking the schema default.
     const originalEnv = process.env.DYNAMIC_CONFIG_POLL_INTERVAL_MS;
     process.env.DYNAMIC_CONFIG_POLL_INTERVAL_MS = '15000';
 
-    // Re-import to pick up the new env value
     jest.resetModules();
     const { validateEnv } = require('../../config/config');
     const cfg = validateEnv(process.env);

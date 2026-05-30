@@ -63,3 +63,6 @@ prisma/dev.db-journal
 # Uploads
 uploads/
 backend/uploads/
+
+# Project Tracking
+somzilla.md

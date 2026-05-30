@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { dynamicConfigService, ConfigType } from '../services/DynamicConfigService';
+import { getDynamicConfigService, ConfigType } from '../services/DynamicConfigService';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { checkPermission } from '../middleware/checkPermission';
 
@@ -12,11 +12,12 @@ const router = Router();
  */
 router.get('/', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
-    const status = dynamicConfigService.getStatus();
+    const svc = await getDynamicConfigService();
+    const status = svc.getStatus();
     const configs: Record<string, any> = {};
 
     for (const key of status.cachedKeys) {
-      configs[key] = dynamicConfigService.get(key);
+      configs[key] = svc.get(key);
     }
 
     res.json({
@@ -36,7 +37,8 @@ router.get('/', authMiddleware, checkPermission('settings:manage'), async (req: 
  */
 router.post('/refresh', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
-    await dynamicConfigService.refreshCache();
+    const svc = await getDynamicConfigService();
+    await svc.refreshCache();
     res.json({ success: true, message: 'Configuration cache refreshed successfully' });
   } catch (error) {
     res.status(500).json({ success: false, message: (error as Error).message });
@@ -57,7 +59,8 @@ router.put('/:key', authMiddleware, checkPermission('settings:manage'), async (r
   }
 
   try {
-    await dynamicConfigService.set(key, value, type as ConfigType, description);
+    const svc = await getDynamicConfigService();
+    await svc.set(key, value, type as ConfigType, description);
     res.json({ success: true, message: `Configuration "${key}" updated successfully` });
   } catch (error) {
     res.status(500).json({ success: false, message: (error as Error).message });
