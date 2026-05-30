@@ -230,3 +230,36 @@ model PayoutTransaction {
   @@index([transactionHash])
   @@index([jobId])
 }
+
+model Subscription {
+  id                     String      @id @default(uuid())
+  userId                 String      @unique
+  plan                   String      @default("free")
+  status                 String      @default("active")
+  stripeCustomerId       String
+  stripeSubscriptionId   String?
+  creditsRemaining       Int
+  creditsMonthly         Int
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  creditLogs             CreditLog[]
+
+  @@index([userId])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+model CreditLog {
+  id             String       @id @default(uuid())
+  userId         String
+  action         String
+  delta          Int
+  balanceAfter   Int
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  subscription   Subscription @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
+}

@@ -6,6 +6,32 @@ const logger = createLogger('AuthBlacklistService');
 
 const BLACKLIST_PREFIX = 'jwt:blacklist:';
 
+// In-memory LRU fallback for recently blacklisted tokens
+const LRU_MAX = 1000;
+const lruCache = new Map<string, number>(); // key -> expiry epoch ms
+
+function lruSet(key: string, ttlSeconds: number): void {
+  if (lruCache.size >= LRU_MAX) {
+    const firstKey = lruCache.keys().next().value;
+    if (firstKey !== undefined) lruCache.delete(firstKey);
+  }
+  lruCache.set(key, Date.now() + ttlSeconds * 1000);
+}
+
+function lruHas(key: string): boolean {
+  const expiry = lruCache.get(key);
+  if (expiry === undefined) return false;
+  if (Date.now() > expiry) {
+    lruCache.delete(key);
+    return false;
+  }
+  return true;
+}
+
+function incrementRedisErrorCounter(): void {
+  logger.warn('metric: auth_blacklist_redis_errors_total +1');
+}
+
 /**
  * Parses a JWT expiry string (e.g. "15m", "7d", "1h") into seconds.
  * Falls back to the provided default if parsing fails.
@@ -32,6 +58,7 @@ export const AuthBlacklistService = {
    */
   blacklistToken: async (tokenKey: string, ttlSeconds: number): Promise<void> => {
     if (ttlSeconds <= 0) return; // already expired, nothing to store
+    lruSet(tokenKey, ttlSeconds);
     try {
       await getRedis().set(`${BLACKLIST_PREFIX}${tokenKey}`, '1', 'EX', ttlSeconds);
     } catch (err) {
@@ -41,15 +68,17 @@ export const AuthBlacklistService = {
 
   /**
    * Returns true if the token has been blacklisted.
-   * Fails closed on Redis error: denies the request to prevent revoked tokens from passing.
+   * On Redis error, logs a warning, increments the error counter, and falls
+   * back to the in-memory LRU cache so valid tokens are not blocked.
    */
   isBlacklisted: async (tokenKey: string): Promise<boolean> => {
     try {
       const result = await getRedis().get(`${BLACKLIST_PREFIX}${tokenKey}`);
       return result !== null;
     } catch (err) {
-      logger.error('Redis unavailable for blacklist check — failing closed', { tokenKey, err });
-      return true; // deny on error (fail-closed)
+      incrementRedisErrorCounter();
+      logger.warn('Redis unavailable for blacklist check — falling back to LRU cache', { tokenKey, err });
+      return lruHas(tokenKey);
     }
   },
 
