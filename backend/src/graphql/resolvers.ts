@@ -26,6 +26,17 @@ async function requireAuth(ctx: GraphQLContext): Promise<string> {
   return ctx.userId;
 }
 
+/**
+ * Require the authenticated user to have the 'admin' role.
+ * Throws FORBIDDEN if the user is authenticated but not an admin.
+ */
+async function requireAdmin(ctx: GraphQLContext): Promise<string> {
+  const userId = await requireAuth(ctx);
+  const user = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+  if (user?.role !== 'admin') throw new Error('FORBIDDEN');
+  return userId;
+}
+
 export const resolvers = {
   DateTime: DateTimeScalar,
 
@@ -36,9 +47,9 @@ export const resolvers = {
       return prisma.user.findUnique({ where: { id: userId } });
     },
 
-    /** Return a single user by ID. */
+    /** Return a single user by ID (admin only). */
     user: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
-      await requireAuth(ctx);
+      await requireAdmin(ctx);
       return prisma.user.findUnique({ where: { id } });
     },
 
@@ -59,6 +70,25 @@ export const resolvers = {
     post: async (_: unknown, { id }: { id: string }, ctx: GraphQLContext) => {
       await requireAuth(ctx);
       return prisma.post.findUnique({ where: { id } });
+    },
+  },
+
+  /**
+   * Field-level authorization for User.
+   * email and role are sensitive — only the owner or an admin may read them.
+   */
+  User: {
+    email: async (parent: { id: string; email: string }, _: unknown, ctx: GraphQLContext) => {
+      const userId = await requireAuth(ctx);
+      const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      if (userId !== parent.id && viewer?.role !== 'admin') throw new Error('FORBIDDEN');
+      return parent.email;
+    },
+    role: async (parent: { id: string; role: string }, _: unknown, ctx: GraphQLContext) => {
+      const userId = await requireAuth(ctx);
+      const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      if (userId !== parent.id && viewer?.role !== 'admin') throw new Error('FORBIDDEN');
+      return parent.role;
     },
   },
 
