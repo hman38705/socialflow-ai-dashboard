@@ -210,3 +210,23 @@ model PayoutFailure {
   @@index([groupId])
   @@index([failedAt])
 }
+
+/// Records Stellar transaction hashes before submission so retries
+/// can detect duplicates and avoid paying a user twice.
+model PayoutTransaction {
+  id              String   @id @default(uuid())
+  groupId         String
+  recipient       String
+  amount          Float
+  currency        String
+  transactionHash String   @unique
+  jobId           String?
+  status          String   @default("pending") // pending | submitted | confirmed | failed
+  createdAt       DateTime @default(now())
+  confirmedAt     DateTime?
+
+  @@index([groupId])
+  @@index([recipient])
+  @@index([transactionHash])
+  @@index([jobId])
+}

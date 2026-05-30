@@ -7,8 +7,7 @@ import express from 'express';
 // Mock authenticate to inject a user id
 jest.mock('../middleware/authenticate', () => ({
   authenticate: (req: any, _res: any, next: any) => {
-    req.userId = req.headers['x-test-user-id'] || 'anon';
-    req.user = { id: req.userId };
+    req.user = { id: req.headers['x-test-user-id'] || 'anon' };
     next();
   },
 }));

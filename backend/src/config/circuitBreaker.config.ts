@@ -186,6 +186,18 @@ export const CIRCUIT_CONFIGS = {
     volumeThreshold: 3,
     name: 'linkedin-service',
   } as CircuitBreakerConfig,
+
+  // Notification providers (Slack, Discord, email etc.) — Circuit opens after repeated failures
+  // to prevent filling the retry queue when providers are unreachable.
+  notification: {
+    timeout: 15000, // 15 seconds
+    errorThresholdPercentage: 50,
+    resetTimeout: 60000, // 1 minute cooldown
+    rollingCountTimeout: 30000,
+    rollingCountBuckets: 10,
+    volumeThreshold: 5,
+    name: 'notification-service',
+  } as CircuitBreakerConfig,
 };
 
 /**
@@ -247,5 +259,11 @@ export const FALLBACK_STRATEGIES = {
   linkedin: {
     enabled: false,
     message: 'LinkedIn API unavailable. Please try again later.',
+  },
+
+  // Notification — Soft fallback so queue processing doesn't throw unhandled rejections
+  notification: {
+    enabled: true,
+    message: 'Notification service temporarily unavailable. Skipping notification.',
   },
 };

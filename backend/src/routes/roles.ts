@@ -73,7 +73,7 @@ router.get(
  *         description: Current user role
  */
 router.get('/me', authMiddleware, (req: AuthRequest, res: Response) => {
-  const role = RoleStore.getRole(req.userId!);
+  const role = RoleStore.getRole(req.user!.id);
   if (!role) return res.json({ role: null, permissions: [] });
   return res.json({ role: role.name, permissions: role.permissions });
 });

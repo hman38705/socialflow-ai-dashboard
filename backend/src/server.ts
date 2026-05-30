@@ -331,6 +331,18 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       });
     }
 
+    // Verify database connectivity before accepting traffic
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      logger.info('Database connectivity verified');
+    } catch (error) {
+      logger.error('Database connectivity check failed — aborting startup', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      doExit(1);
+      return;
+    }
+
     // Start HTTP server
     serverInstance = app.listen(PORT, () => {
       logger.info(`🚀 SocialFlow Backend is running on http://localhost:${PORT}`);

@@ -11,7 +11,7 @@ import { parsePageLimit, toSkipTake, buildPageResponse } from '../utils/paginati
 export async function listWebhooks(req: AuthRequest, res: Response, next: NextFunction) {
   try {
     const params = parsePageLimit(req);
-    const where = { userId: req.userId! };
+    const where = { userId: req.user!.id };
     const select = {
       id: true,
       url: true,
@@ -45,7 +45,7 @@ export async function createWebhook(req: AuthRequest, res: Response, next: NextF
     const hashedSecret = crypto.createHash('sha256').update(secret).digest('hex');
 
     const sub = await prisma.webhookSubscription.create({
-      data: { userId: req.userId!, url, secret: hashedSecret, events },
+      data: { userId: req.user!.id, url, secret: hashedSecret, events },
       select: { id: true, url: true, events: true, isActive: true, createdAt: true },
     });
 
@@ -59,7 +59,7 @@ export async function createWebhook(req: AuthRequest, res: Response, next: NextF
 // ── Get single subscription ───────────────────────────────────────────────────
 export async function getWebhook(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const sub = await findOwned(req.params.id, req.userId!);
+    const sub = await findOwned(req.params.id, req.user!.id);
     res.json({
       id: sub.id,
       url: sub.url,
@@ -76,7 +76,7 @@ export async function getWebhook(req: AuthRequest, res: Response, next: NextFunc
 // ── Update subscription ───────────────────────────────────────────────────────
 export async function updateWebhook(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    await findOwned(req.params.id, req.userId!);
+    await findOwned(req.params.id, req.user!.id);
     const body = req.body as UpdateWebhookInput;
 
     const data: Record<string, unknown> = {};
@@ -101,7 +101,7 @@ export async function updateWebhook(req: AuthRequest, res: Response, next: NextF
 // ── Delete subscription ───────────────────────────────────────────────────────
 export async function deleteWebhook(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    await findOwned(req.params.id, req.userId!);
+    await findOwned(req.params.id, req.user!.id);
     await prisma.webhookSubscription.delete({ where: { id: req.params.id } });
     res.status(204).send();
   } catch (err) {
@@ -112,7 +112,7 @@ export async function deleteWebhook(req: AuthRequest, res: Response, next: NextF
 // ── Test delivery ─────────────────────────────────────────────────────────────
 export async function testWebhook(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    const sub = await findOwned(req.params.id, req.userId!);
+    const sub = await findOwned(req.params.id, req.user!.id);
     const { eventType } = req.body;
 
     if (!sub.events.includes(eventType)) {
@@ -122,7 +122,7 @@ export async function testWebhook(req: AuthRequest, res: Response, next: NextFun
 
     await dispatchEvent(
       eventType as any,
-      { test: true, triggeredBy: req.userId },
+      { test: true, triggeredBy: req.user!.id },
       'socialflow-test',
     );
     res.json({ message: 'Test event dispatched' });
@@ -134,7 +134,7 @@ export async function testWebhook(req: AuthRequest, res: Response, next: NextFun
 // ── Delivery history ──────────────────────────────────────────────────────────
 export async function listDeliveries(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    await findOwned(req.params.id, req.userId!);
+    await findOwned(req.params.id, req.user!.id);
     const params = parsePageLimit(req);
     const where = { subscriptionId: req.params.id };
     const select = {
@@ -172,7 +172,7 @@ export async function replayDelivery(req: AuthRequest, res: Response, next: Next
       include: { subscription: true },
     });
     if (!delivery) throw new NotFoundError('Delivery not found');
-    if (delivery.subscription.userId !== req.userId) throw new ForbiddenError();
+    if (delivery.subscription.userId !== req.user!.id) throw new ForbiddenError();
 
     // Reset to pending and re-attempt immediately
     await prisma.webhookDelivery.update({

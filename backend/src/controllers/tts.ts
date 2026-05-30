@@ -10,7 +10,7 @@ export async function createTTSJob(req: AuthRequest, res: Response, next: NextFu
     const body = req.body as CreateTTSJobInput;
     const jobId = await ttsService.createJob({
       ...body,
-      userId: req.userId,
+      userId: req.user?.id,
     });
     res.status(202).json({ jobId, status: 'pending' });
   } catch (err) {

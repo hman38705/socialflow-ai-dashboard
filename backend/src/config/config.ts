@@ -3,6 +3,8 @@ import dotenv from 'dotenv';
 
 dotenv.config();
 
+const JWT_SECRET_MIN_LENGTH = 32;
+
 const envSchema = z.object({
   // ── Server ────────────────────────────────────────────────────────────────
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -23,9 +25,13 @@ const envSchema = z.object({
     .transform((v) => v === 'true'),
 
   // ── JWT ───────────────────────────────────────────────────────────────────
-  JWT_SECRET: z.string().min(1, 'JWT_SECRET is required'),
+  JWT_SECRET: z
+    .string()
+    .min(JWT_SECRET_MIN_LENGTH, `JWT_SECRET must be at least ${JWT_SECRET_MIN_LENGTH} characters`),
   JWT_EXPIRES_IN: z.string().default('15m'),
-  JWT_REFRESH_SECRET: z.string().min(1, 'JWT_REFRESH_SECRET is required'),
+  JWT_REFRESH_SECRET: z
+    .string()
+    .min(JWT_SECRET_MIN_LENGTH, `JWT_REFRESH_SECRET must be at least ${JWT_SECRET_MIN_LENGTH} characters`),
   JWT_REFRESH_EXPIRES_IN: z.string().default('7d'),
 
   // ── Redis ─────────────────────────────────────────────────────────────────

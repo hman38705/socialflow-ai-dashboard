@@ -142,7 +142,7 @@ describe('#616 edge cases', () => {
     expect(AuthBlacklistService.isBlacklisted).not.toHaveBeenCalled();
   });
 
-  it('sets req.user and req.userId for a valid, non-blacklisted token', async () => {
+  it('sets req.user for a valid, non-blacklisted token', async () => {
     const validToken = jwt.sign({ sub: 'user-6' }, SECRET, { expiresIn: '15m' });
 
     const req = makeReq(validToken);
@@ -151,7 +151,6 @@ describe('#616 edge cases', () => {
     await authenticate(req, res, next);
 
     expect(req.user).toEqual({ id: 'user-6' });
-    expect(req.userId).toBe('user-6');
     expect(next).toHaveBeenCalled();
   });
 });

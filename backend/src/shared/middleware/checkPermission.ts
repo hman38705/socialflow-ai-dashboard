@@ -4,7 +4,7 @@ import { Permission, RoleStore } from '../models/Role';
 
 /**
  * Middleware factory that enforces one or more permissions.
- * Must be used after `authMiddleware` (requires req.userId).
+ * Must be used after `authMiddleware` (requires req.user.id).
  *
  * Usage:
  *   router.post('/posts', authMiddleware, checkPermission('posts:create'), handler)
@@ -12,7 +12,7 @@ import { Permission, RoleStore } from '../models/Role';
  */
 export function checkPermission(...required: Permission[]) {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    const userId = req.userId;
+    const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ message: 'Unauthorized' });
       return;

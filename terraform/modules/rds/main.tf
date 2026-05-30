@@ -62,6 +62,7 @@ resource "aws_db_instance" "main" {
   parameter_group_name   = aws_db_parameter_group.main.name
   skip_final_snapshot    = var.env == "dev"
   deletion_protection    = var.env == "prod"
+  multi_az               = true
   backup_retention_period = var.backup_retention_days
   tags                   = { Env = var.env }
 }

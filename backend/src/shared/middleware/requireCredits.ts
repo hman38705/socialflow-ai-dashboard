@@ -12,7 +12,7 @@ import { CreditAction } from '../models/Subscription';
  */
 export function requireCredits(action: CreditAction) {
   return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    const userId = req.userId;
+    const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ message: 'Unauthorized' });
       return;

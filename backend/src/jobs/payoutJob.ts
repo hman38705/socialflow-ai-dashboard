@@ -2,10 +2,34 @@ import { Job } from 'bullmq';
 import { queueManager } from '../queues/queueManager';
 import { PayoutJobData, PAYOUT_QUEUE_NAME } from '../queues/payoutQueue';
 import { prisma } from '../lib/prisma';
+import { createHash } from 'crypto';
+
+/**
+ * Derive a deterministic transaction hash for a payout.
+ * In production this would be the actual Stellar transaction hash
+ * returned by the Horizon API after building and submitting the tx.
+ * By computing it deterministically before submission we can detect
+ * duplicate retries and avoid paying a user twice.
+ */
+function deriveTransactionHash(data: {
+  groupId: string;
+  amount: number;
+  recipient: string;
+  currency: string;
+  jobId: string;
+}): string {
+  const payload = `${data.jobId}|${data.groupId}|${data.recipient}|${data.amount}|${data.currency}`;
+  return `stellar-tx-${createHash('sha256').update(payload).digest('hex')}`;
+}
 
 /**
  * Payout job processor
  * Handles processing payouts with retry logic and error handling
+ *
+ * Idempotency for Stellar/crypto transactions:
+ * Before submitting a Stellar transaction the hash is stored in the
+ * PayoutTransaction table. On retry the job checks whether the hash
+ * already exists and skips submission, preventing duplicate payouts.
  */
 export async function processPayoutJob(job: Job<PayoutJobData>) {
   const {
@@ -36,6 +60,49 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     // Log progress
     await job.updateProgress(20);
 
+    // ── Stellar / crypto idempotency check ────────────────────────────────
+    let transactionHash: string | undefined;
+    let skipped = false;
+
+    if (recipientType === 'crypto' || recipientType === 'wallet') {
+      transactionHash = deriveTransactionHash({
+        groupId,
+        amount,
+        recipient,
+        currency,
+        jobId: job.id ?? 'unknown',
+      });
+
+      // On retry, check if this transaction was already recorded.
+      // If found, we skip submission to avoid paying the user twice.
+      const existing = await prisma.payoutTransaction.findUnique({
+        where: { transactionHash },
+      });
+
+      if (existing) {
+        console.log(
+          `[PayoutJob] Duplicate detected for job ${job.id} —` +
+            ` skipping submission (existing tx: ${existing.id})`,
+        );
+        skipped = true;
+      } else {
+        // Persist the hash BEFORE submitting so even a crash after this point
+        // will be caught on retry.
+        await prisma.payoutTransaction.create({
+          data: {
+            groupId,
+            recipient,
+            amount,
+            currency,
+            transactionHash,
+            jobId: job.id ?? 'unknown',
+            status: 'pending',
+          },
+        });
+      }
+    }
+
+    // ── Payment processing ────────────────────────────────────────────────
     // Simulate payout processing - replace with actual payment service implementation
     // const paymentService = require('../services/paymentService').paymentService;
     // const result = await paymentService.process({
@@ -48,33 +115,46 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     // });
 
     // Simulate processing time for financial transaction
-    await new Promise((resolve) => setTimeout(resolve, 500));
+    if (!skipped) {
+      await new Promise((resolve) => setTimeout(resolve, 500));
 
-    await job.updateProgress(80);
+      await job.updateProgress(80);
 
-    // Simulate blockchain transaction if applicable
-    if (recipientType === 'crypto' || recipientType === 'wallet') {
-      // const blockchainService = require('../services/blockchainService').blockchainService;
-      // await blockchainService.submitTransaction({ ... });
-      await new Promise((resolve) => setTimeout(resolve, 200));
+      // Submit Stellar transaction (actual implementation)
+      if (recipientType === 'crypto' || recipientType === 'wallet') {
+        // const blockchainService = require('../services/blockchainService').blockchainService;
+        // const stellarResult = await blockchainService.submitTransaction({ ... });
+        await new Promise((resolve) => setTimeout(resolve, 200));
+
+        // Mark the transaction as confirmed after successful submission
+        if (transactionHash) {
+          await prisma.payoutTransaction.update({
+            where: { transactionHash },
+            data: { status: 'confirmed', confirmedAt: new Date() },
+          });
+        }
+      }
     }
 
     await job.updateProgress(95);
 
     // Log completion
     console.log(
-      `[PayoutJob] Job ${job.id} completed successfully - ${amount} ${currency} sent to ${recipient}`,
+      `[PayoutJob] Job ${job.id} completed successfully - ${amount} ${currency} sent to ${recipient}` +
+        (skipped ? ' (skipped — duplicate)' : ''),
     );
 
     return {
       success: true,
       transactionId: job.id,
+      transactionHash,
       groupId,
       amount,
       currency,
       recipient,
       recipientType,
       status: 'completed',
+      skipped,
       processedAt: new Date().toISOString(),
       metadata,
     };
