@@ -163,6 +163,20 @@ describe('LinkedInService.shareContent — validation', () => {
     await linkedInService.shareContent('token', { ...BASE_REQUEST, mediaAssets: assets }).catch(() => {});
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it('throws ValidationError when an image URL is not publicly accessible', async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse({}, 404));
+
+    await expect(
+      linkedInService.shareContent('token', {
+        ...BASE_REQUEST,
+        mediaAssets: [{ url: 'https://cdn.example.com/private-photo.jpg' }],
+      }),
+    ).rejects.toThrow(ValidationError);
+
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+    expect(mockFetch.mock.calls[0][0]).toBe('https://cdn.example.com/private-photo.jpg');
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -189,6 +203,7 @@ describe('LinkedInService.shareContent — network', () => {
   });
 
   it('posts a single-image UGC post with correct IMAGE payload', async () => {
+    mockFetch.mockResolvedValueOnce(okResponse());
     mockFetch.mockResolvedValueOnce(
       okResponse({ 'x-restli-id': 'urn:li:ugcPost:222' }),
     );
@@ -199,8 +214,13 @@ describe('LinkedInService.shareContent — network', () => {
     });
 
     expect(result.id).toBe('urn:li:ugcPost:222');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const [headUrl, headInit] = mockFetch.mock.calls[0];
+    expect(headUrl).toBe('https://cdn.example.com/photo.jpg');
+    expect(headInit.method).toBe('HEAD');
+
+    const body = JSON.parse(mockFetch.mock.calls[1][1].body);
     const shareContent = body.specificContent['com.linkedin.ugc.ShareContent'];
     expect(shareContent.shareMediaCategory).toBe('IMAGE');
     expect(shareContent.media).toHaveLength(1);
@@ -209,9 +229,12 @@ describe('LinkedInService.shareContent — network', () => {
   });
 
   it('posts a multi-image UGC post with 3 assets', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okResponse({ 'x-restli-id': 'urn:li:ugcPost:333' }),
-    );
+    mockFetch.mockImplementation(async (_url, init) => {
+      if (init?.method === 'HEAD') {
+        return okResponse();
+      }
+      return okResponse({ 'x-restli-id': 'urn:li:ugcPost:333' });
+    });
 
     const assets = [
       { url: 'https://cdn.example.com/img1.jpg' },
@@ -225,8 +248,10 @@ describe('LinkedInService.shareContent — network', () => {
     });
 
     expect(result.id).toBe('urn:li:ugcPost:333');
+    expect(mockFetch).toHaveBeenCalledTimes(4);
+    expect(mockFetch.mock.calls.slice(0, 3).every((call) => call[1]?.method === 'HEAD')).toBe(true);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const body = JSON.parse(mockFetch.mock.calls[3][1].body);
     const shareContent = body.specificContent['com.linkedin.ugc.ShareContent'];
     expect(shareContent.shareMediaCategory).toBe('IMAGE');
     expect(shareContent.media).toHaveLength(3);
@@ -235,9 +260,12 @@ describe('LinkedInService.shareContent — network', () => {
   });
 
   it('posts a multi-image UGC post with exactly 20 assets (boundary)', async () => {
-    mockFetch.mockResolvedValueOnce(
-      okResponse({ 'x-restli-id': 'urn:li:ugcPost:444' }),
-    );
+    mockFetch.mockImplementation(async (_url, init) => {
+      if (init?.method === 'HEAD') {
+        return okResponse();
+      }
+      return okResponse({ 'x-restli-id': 'urn:li:ugcPost:444' });
+    });
 
     const assets = Array.from({ length: 20 }, (_, i) => ({
       url: `https://cdn.example.com/img${i + 1}.jpg`,
@@ -249,8 +277,10 @@ describe('LinkedInService.shareContent — network', () => {
     });
 
     expect(result.id).toBe('urn:li:ugcPost:444');
+    expect(mockFetch).toHaveBeenCalledTimes(21);
+    expect(mockFetch.mock.calls.slice(0, 20).every((call) => call[1]?.method === 'HEAD')).toBe(true);
 
-    const body = JSON.parse(mockFetch.mock.calls[0][1].body);
+    const body = JSON.parse(mockFetch.mock.calls[20][1].body);
     const shareContent = body.specificContent['com.linkedin.ugc.ShareContent'];
     expect(shareContent.media).toHaveLength(20);
   });
