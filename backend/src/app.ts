@@ -24,6 +24,9 @@ const app: Application = express();
 
 // ── Core middleware ───────────────────────────────────────────────────────────
 
+// Security headers — applied globally before any route
+app.use(helmet());
+
 // Response compression (Gzip/Brotli) — before body parsing so all responses are eligible
 app.use(compressionMiddleware);
 
