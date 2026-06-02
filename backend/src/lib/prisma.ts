@@ -12,7 +12,14 @@ const tracer = trace.getTracer('socialflow-db');
 const SOFT_DELETE_MODELS = new Set(['User', 'Listing', 'Post', 'Organization', 'WebhookSubscription']);
 
 // Models that should be scoped to an organization
-const ORG_SCOPED_MODELS = new Set(['Post', 'AnalyticsEntry']);
+export const ORG_SCOPED_MODELS = new Set([
+  'Post',
+  'AnalyticsEntry',
+  'Listing',
+  'OrganizationMember',
+  'AuditLog',
+  'AIGenerationResult',
+]);
 
 const POOL_DEFAULTS = {
   development: { connection_limit: 5,  pool_timeout: 10 },
