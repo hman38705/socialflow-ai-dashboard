@@ -1,11 +1,14 @@
 import { Response, NextFunction } from 'express';
 import crypto from 'crypto';
 import { prisma } from '../lib/prisma';
+import { createLogger } from '../lib/logger';
 import { AuthRequest } from '../middleware/authMiddleware';
 import { NotFoundError, ForbiddenError } from '../lib/errors';
 import { dispatchEvent } from '../services/WebhookDispatcher';
 import { CreateWebhookInput, UpdateWebhookInput } from '../schemas/webhooks';
 import { parsePageLimit, toSkipTake, buildPageResponse } from '../utils/pagination';
+
+const logger = createLogger('WebhooksController');
 
 // ── List subscriptions ────────────────────────────────────────────────────────
 export async function listWebhooks(req: AuthRequest, res: Response, next: NextFunction) {
@@ -180,7 +183,9 @@ export async function replayDelivery(req: AuthRequest, res: Response, next: Next
       data: { status: 'pending', nextRetryAt: null },
     });
 
-    dispatchEvent(delivery.eventType as any, JSON.parse(delivery.payload)).catch(() => {});
+    dispatchEvent(delivery.eventType as any, JSON.parse(delivery.payload)).catch((err) => {
+      logger.error('Webhook replay dispatch failed', { err, deliveryId: delivery.id });
+    });
     res.json({ message: 'Delivery replay queued' });
   } catch (err) {
     next(err);

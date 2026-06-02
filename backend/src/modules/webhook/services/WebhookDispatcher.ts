@@ -64,7 +64,9 @@ export async function dispatchEvent(
         },
       });
       // Fire-and-forget; errors are caught and persisted inside
-      attemptDelivery(delivery.id, sub.url, sub.secret, payload, 1).catch(() => {});
+      attemptDelivery(delivery.id, sub.url, sub.secret, payload, 1).catch((err) => {
+        logger.error('Webhook dispatch failed', { err, deliveryId: delivery.id, url: sub.url });
+      });
     }),
   );
 }
@@ -176,7 +178,13 @@ export async function retryPendingDeliveries(): Promise<void> {
         d.subscription.secret,
         d.payload,
         d.attempts + 1,
-      ).catch(() => {}),
+      ).catch((err) => {
+        logger.error('Webhook retry failed', {
+          err,
+          deliveryId: d.id,
+          url: d.subscription.url,
+        });
+      }),
     ),
   );
 }
