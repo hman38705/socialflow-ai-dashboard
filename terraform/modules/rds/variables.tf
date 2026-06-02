@@ -15,3 +15,9 @@ variable "backup_retention_days" {
   default     = 7
   description = "Backup retention period in days. Set to 0 to disable (AWS default). Minimum 7 recommended for production."
 }
+
+variable "enable_deletion_protection" {
+  type        = bool
+  default     = true
+  description = "Prevents the RDS instance from being accidentally deleted. Set to false only for dev/test environments that need terraform destroy."
+}

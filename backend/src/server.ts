@@ -4,7 +4,6 @@ import { config } from './config/config';
 import app from './app';
 import { SocketService } from './services/SocketService';
 import { initializeWorkers } from './jobs/workers';
-import { startWorkers } from './workers/index';
 import { queueManager, closeRedisClient } from './queues/queueManager';
 import { startDataPruningJob, stopDataPruningJob } from './jobs/dataPruningJob';
 import { startYouTubeSyncJob, stopYouTubeSyncJob } from './jobs/youtubeSyncJob';
@@ -255,10 +254,10 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       // Note: Do not exit on this error; continue with in-memory fallback
     }
 
-    // Initialize job queue workers
+    // Initialize job queue workers (email, payout, sync, notification, moderation)
+    // AI and social posting workers run in the separate socialflow-worker process
     logger.info('Initializing job queue workers...');
     initializeWorkers();
-    startWorkers();
 
     // Initialize health monitoring
     try {

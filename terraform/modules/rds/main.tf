@@ -61,7 +61,7 @@ resource "aws_db_instance" "main" {
   vpc_security_group_ids = [aws_security_group.rds.id]
   parameter_group_name   = aws_db_parameter_group.main.name
   skip_final_snapshot    = var.env == "dev"
-  deletion_protection    = var.env == "prod"
+  deletion_protection    = var.enable_deletion_protection
   multi_az               = true
   backup_retention_period = var.backup_retention_days
   tags                   = { Env = var.env }

@@ -385,7 +385,7 @@ function createAIWorker(): Worker<AIJobData> {
 }
 
 function createSocialWorker(): Worker<SocialJobData> {
-  return queueManager.createWorker(
+  const worker = queueManager.createWorker(
     SOCIAL_QUEUE_NAME,
     async (job: Job<SocialJobData>) => {
       const processor = socialProcessors[job.data.type];
@@ -396,6 +396,45 @@ function createSocialWorker(): Worker<SocialJobData> {
     },
     { concurrency: 3 }, // Lower concurrency to respect platform rate limits
   ) as Worker<SocialJobData>;
+
+  worker.on('failed', async (job: Job<SocialJobData> | undefined, err: Error) => {
+    if (!job) return;
+    const maxAttempts = job.opts.attempts ?? 3;
+    const isFinal = job.attemptsMade >= maxAttempts;
+
+    logger.error('Social posting job failed', {
+      jobId: job.id,
+      platform: job.data.platform,
+      userId: job.data.userId,
+      type: job.data.type,
+      attemptsMade: job.attemptsMade,
+      maxAttempts,
+      reason: err.message,
+      permanent: isFinal,
+    });
+
+    if (isFinal) {
+      // Notify the user that their post has permanently failed (exhausted all retries)
+      try {
+        const { sendInAppNotification } = await import('../queues/notificationQueue');
+        await sendInAppNotification(
+          job.data.userId,
+          'Post failed to publish',
+          `Your ${job.data.platform} post could not be published after ${job.attemptsMade} attempt(s): ${err.message}`,
+          { jobId: job.id, platform: job.data.platform, type: job.data.type },
+          { userId: job.data.userId, priority: 'high' },
+        );
+      } catch (notifyErr) {
+        logger.error('Failed to enqueue failure notification for social job', {
+          jobId: job.id,
+          userId: job.data.userId,
+          error: (notifyErr as Error).message,
+        });
+      }
+    }
+  });
+
+  return worker;
 }
 
 // ── Bootstrap ─────────────────────────────────────────────────────────────────
@@ -408,3 +447,4 @@ export function startWorkers(): { ai: Worker<AIJobData>; social: Worker<SocialJo
   });
   return { ai, social };
 }
+

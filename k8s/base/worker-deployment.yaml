@@ -1,0 +1,43 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: socialflow-worker
+  labels:
+    app: socialflow-worker
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: socialflow-worker
+  template:
+    metadata:
+      labels:
+        app: socialflow-worker
+    spec:
+      serviceAccountName: socialflow-backend
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        fsGroup: 1000
+      containers:
+        - name: worker
+          image: socialflow-worker:latest
+          imagePullPolicy: IfNotPresent
+          envFrom:
+            - configMapRef:
+                name: socialflow-config
+            - secretRef:
+                name: socialflow-secrets
+          lifecycle:
+            preStop:
+              exec:
+                # Allow BullMQ to finish in-flight jobs before the container stops
+                command: ["sleep", "10"]
+          resources:
+            requests:
+              cpu: 500m
+              memory: 512Mi
+            limits:
+              cpu: "2"
+              memory: 1Gi
