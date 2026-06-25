@@ -20,6 +20,8 @@ export class SocketService {
   private static instance: SocketService;
   private io?: Server;
   private jobProgressListener?: (event: JobProgressEvent) => void;
+  private socketRoomMemberships = new Map<string, Set<string>>();
+  private socketUsers = new Map<string, string>();
 
   private constructor() {}
 
@@ -78,28 +80,33 @@ export class SocketService {
     this.io.on('connection', async (socket: AuthenticatedSocket) => {
       logger.info(`Authorized connection from ${socket.id}`);
 
-      // Join user-specific room for job progress
+      const rooms = new Set<string>();
       const userId = socket.user?.sub;
       if (userId) {
         const userRoom = `user:${userId}`;
         socket.join(userRoom);
+        rooms.add(userRoom);
+        this.socketUsers.set(socket.id, userId);
         logger.info(`Client ${socket.id} joined room ${userRoom}`);
       }
 
-      // Auto-join specific namespace or org-based rooms based on client query
       const orgId = socket.handshake.query.orgId as string;
       if (orgId && userId) {
         const member = await prisma.organizationMember.findFirst({
           where: { organizationId: orgId, userId },
         });
         if (member) {
-          socket.join(`org:${orgId}`);
-          logger.info(`Client ${socket.id} joined room org:${orgId}`);
+          const orgRoom = `org:${orgId}`;
+          socket.join(orgRoom);
+          rooms.add(orgRoom);
+          logger.info(`Client ${socket.id} joined room ${orgRoom}`);
         } else {
           socket.emit('error', { message: 'Not a member of this organisation' });
           logger.warn(`Client ${socket.id} denied access to org:${orgId} — not a member`);
         }
       }
+
+      this.socketRoomMemberships.set(socket.id, rooms);
 
       // Handle message events dynamically
       socket.on('message', (payload) => {
@@ -123,6 +130,8 @@ export class SocketService {
       });
 
       socket.on('disconnect', () => {
+        this.socketRoomMemberships.delete(socket.id);
+        this.socketUsers.delete(socket.id);
         logger.info(`Client disconnected: ${socket.id}`);
       });
     });
