@@ -4,6 +4,9 @@ import { orgMiddleware } from '../middleware/orgMiddleware';
 import { checkPermission } from '../middleware/checkPermission';
 import { ExportService } from '../services/ExportService';
 import { AuthRequest } from '../middleware/authMiddleware';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('exports-route');
 
 const router = Router();
 
@@ -84,7 +87,7 @@ router.get(
         await ExportService.streamAnalyticsAsJSON(organizationId, start, end, res);
       }
     } catch (error) {
-      console.error('Export error:', error);
+      logger.error('Export error', { error });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Export failed' });
       }
@@ -160,7 +163,7 @@ router.get(
         await ExportService.streamPostsAsJSON(organizationId, start, end, res);
       }
     } catch (error) {
-      console.error('Export error:', error);
+      logger.error('Export error', { error });
       if (!res.headersSent) {
         res.status(500).json({ error: 'Export failed' });
       }

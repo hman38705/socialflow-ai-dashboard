@@ -1,10 +1,10 @@
 import { ExportService } from '../ExportService';
-import { prisma } from '../../lib/prisma';
+import { replicaClient } from '../../lib/readReplica';
 import { Response } from 'express';
 
-// Mock Prisma
-jest.mock('../../lib/prisma', () => ({
-  prisma: {
+// Mock replicaClient
+jest.mock('../../lib/readReplica', () => ({
+  replicaClient: {
     analyticsEntry: {
       findMany: jest.fn(),
       count: jest.fn().mockResolvedValue(0),
@@ -32,7 +32,7 @@ describe('ExportService', () => {
 
   describe('streamAnalyticsAsCSV', () => {
     it('should set correct headers for CSV export', async () => {
-      (prisma.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
 
       await ExportService.streamAnalyticsAsCSV(
         'org-123',
@@ -49,8 +49,8 @@ describe('ExportService', () => {
     });
 
     it('should set Content-Length header based on row count', async () => {
-      (prisma.analyticsEntry.count as jest.Mock).mockResolvedValue(10);
-      (prisma.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.analyticsEntry.count as jest.Mock).mockResolvedValue(10);
+      (replicaClient.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
 
       await ExportService.streamAnalyticsAsCSV(
         'org-123',
@@ -63,14 +63,14 @@ describe('ExportService', () => {
     });
 
     it('should query analytics with correct date range', async () => {
-      (prisma.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
 
       const startDate = new Date('2025-01-01');
       const endDate = new Date('2025-12-31');
 
       await ExportService.streamAnalyticsAsCSV('org-123', startDate, endDate, mockRes as Response);
 
-      expect(prisma.analyticsEntry.findMany).toHaveBeenCalledWith(
+      expect(replicaClient.analyticsEntry.findMany).toHaveBeenCalledWith(
         expect.objectContaining({
           where: expect.objectContaining({
             organizationId: 'org-123',
@@ -93,7 +93,7 @@ describe('ExportService', () => {
         recordedAt: new Date('2025-06-15'),
       }));
 
-      (prisma.analyticsEntry.findMany as jest.Mock)
+      (replicaClient.analyticsEntry.findMany as jest.Mock)
         .mockResolvedValueOnce(mockData)
         .mockResolvedValueOnce([]);
 
@@ -105,10 +105,10 @@ describe('ExportService', () => {
       );
 
       // Should be called twice: first batch + second batch (empty)
-      expect(prisma.analyticsEntry.findMany).toHaveBeenCalledTimes(2);
+      expect(replicaClient.analyticsEntry.findMany).toHaveBeenCalledTimes(2);
 
       // Second call should use cursor
-      expect(prisma.analyticsEntry.findMany).toHaveBeenNthCalledWith(
+      expect(replicaClient.analyticsEntry.findMany).toHaveBeenNthCalledWith(
         2,
         expect.objectContaining({
           cursor: { id: 'id-999' },
@@ -120,7 +120,7 @@ describe('ExportService', () => {
 
   describe('streamAnalyticsAsJSON', () => {
     it('should set correct headers for JSON export', async () => {
-      (prisma.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
 
       await ExportService.streamAnalyticsAsJSON(
         'org-123',
@@ -138,11 +138,24 @@ describe('ExportService', () => {
         'attachment; filename="analytics.jsonl"',
       );
     });
+
+    it('should query via replicaClient, not the primary prisma client', async () => {
+      (replicaClient.analyticsEntry.findMany as jest.Mock).mockResolvedValue([]);
+
+      await ExportService.streamAnalyticsAsJSON(
+        'org-123',
+        new Date('2025-01-01'),
+        new Date('2025-12-31'),
+        mockRes as Response,
+      );
+
+      expect(replicaClient.analyticsEntry.findMany).toHaveBeenCalled();
+    });
   });
 
   describe('streamPostsAsCSV', () => {
     it('should set correct headers for posts CSV export', async () => {
-      (prisma.post.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.post.findMany as jest.Mock).mockResolvedValue([]);
 
       await ExportService.streamPostsAsCSV(
         'org-123',
@@ -170,7 +183,7 @@ describe('ExportService', () => {
         },
       ];
 
-      (prisma.post.findMany as jest.Mock).mockResolvedValueOnce(mockData).mockResolvedValueOnce([]);
+      (replicaClient.post.findMany as jest.Mock).mockResolvedValueOnce(mockData).mockResolvedValueOnce([]);
 
       await ExportService.streamPostsAsCSV(
         'org-123',
@@ -186,7 +199,7 @@ describe('ExportService', () => {
 
   describe('streamPostsAsJSON', () => {
     it('should set correct headers for posts JSON export', async () => {
-      (prisma.post.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.post.findMany as jest.Mock).mockResolvedValue([]);
 
       await ExportService.streamPostsAsJSON(
         'org-123',

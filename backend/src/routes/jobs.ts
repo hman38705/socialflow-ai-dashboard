@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { authenticate as authMiddleware } from '../middleware/authenticate';
 import { checkPermission } from '../middleware/checkPermission';
 import { jobMonitor, JobStatus } from '../services/jobMonitor';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('jobs-route');
 
 const router = Router();
 
@@ -20,7 +23,7 @@ router.get('/jobs/stats', async (_req: Request, res: Response) => {
     const stats = await jobMonitor.getSystemStats();
     res.json(stats);
   } catch (error: any) {
-    console.error('Error getting system stats:', error);
+    logger.error('Error getting system stats', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -40,7 +43,7 @@ router.get('/jobs/queues', (_req: Request, res: Response) => {
     const queues = jobMonitor.getQueueNames();
     res.json({ queues, count: queues.length });
   } catch (error: any) {
-    console.error('Error getting queue names:', error);
+    logger.error('Error getting queue names', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -74,7 +77,7 @@ router.get('/jobs/:queue/stats', async (req: Request, res: Response) => {
 
     res.json(stats);
   } catch (error: any) {
-    console.error('Error getting queue stats:', error);
+    logger.error('Error getting queue stats', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -121,7 +124,7 @@ router.get('/jobs/:queue/jobs', async (req: Request, res: Response) => {
     const jobs = await jobMonitor.getJobs(queue, status, start, end);
     res.json({ jobs, count: jobs.length, status, start, end });
   } catch (error: any) {
-    console.error('Error getting jobs:', error);
+    logger.error('Error getting jobs', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -179,7 +182,7 @@ router.get('/jobs/:queue/jobs/:jobId', async (req: Request, res: Response) => {
 
     res.json(job);
   } catch (error: any) {
-    console.error('Error getting job:', error);
+    logger.error('Error getting job', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -219,7 +222,7 @@ router.get('/jobs/:queue/failed', async (req: Request, res: Response) => {
     const failed = await jobMonitor.getJobs(queue, 'failed', start, end);
     res.json({ jobs: failed, count: failed.length });
   } catch (error: any) {
-    console.error('Error getting failed jobs:', error);
+    logger.error('Error getting failed jobs', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -259,7 +262,7 @@ router.post('/jobs/:queue/jobs/:jobId/retry', authMiddleware, checkPermission('s
 
     res.json({ success: true, message: `Job ${jobId} retry initiated` });
   } catch (error: any) {
-    console.error('Error retrying job:', error);
+    logger.error('Error retrying job', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -288,7 +291,7 @@ router.post('/jobs/:queue/retry-all', authMiddleware, checkPermission('settings:
 
     res.json({ success: true, retried, message: `${retried} jobs retried` });
   } catch (error: any) {
-    console.error('Error retrying all failed jobs:', error);
+    logger.error('Error retrying all failed jobs', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -309,7 +312,7 @@ router.delete('/jobs/:queue/jobs/:jobId', authMiddleware, checkPermission('setti
 
     res.json({ success: true, message: `Job ${jobId} removed` });
   } catch (error: any) {
-    console.error('Error removing job:', error);
+    logger.error('Error removing job', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -342,7 +345,7 @@ router.post('/jobs/:queue/pause', authMiddleware, checkPermission('settings:mana
 
     res.json({ success: true, message: `Queue "${queue}" paused` });
   } catch (error: any) {
-    console.error('Error pausing queue:', error);
+    logger.error('Error pausing queue', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -375,7 +378,7 @@ router.post('/jobs/:queue/resume', authMiddleware, checkPermission('settings:man
 
     res.json({ success: true, message: `Queue "${queue}" resumed` });
   } catch (error: any) {
-    console.error('Error resuming queue:', error);
+    logger.error('Error resuming queue', { error });
     res.status(500).json({ error: error.message });
   }
 });
@@ -408,7 +411,7 @@ router.delete('/jobs/:queue/clear', authMiddleware, checkPermission('settings:ma
 
     res.json({ success: true, message: `Queue "${queue}" cleared` });
   } catch (error: any) {
-    console.error('Error clearing queue:', error);
+    logger.error('Error clearing queue', { error });
     res.status(500).json({ error: error.message });
   }
 });

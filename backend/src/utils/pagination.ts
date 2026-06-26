@@ -217,7 +217,21 @@ export function decodeCursor(cursor: string): TimestampCursor | null {
 /**
  * Validate that a cursor belongs to the requesting organization.
  * Queries the database to verify the record exists and belongs to activeOrgId.
- * 
+ *
+ * REQUIRED CALL SITES — every route or service that accepts a client-supplied
+ * cursor (via `parseCursor`, `decodeCursor`, or a raw `cursor` query param) MUST
+ * call this function before using the cursor value.  Skipping it allows a client
+ * to walk data across organization boundaries by replaying or guessing cursors.
+ *
+ * Known call sites that must invoke this guard:
+ *   - Any future route handler that calls `parseCursor(req)` and passes the
+ *     resulting cursor into a Prisma `findMany` / `findUnique` query.
+ *   - Any service method that accepts a caller-supplied `cursor` string and
+ *     uses `decodeCursor` internally to resolve a record ID.
+ *
+ * On failure, return HTTP 400 (malformed cursor) or 403 (cursor belongs to a
+ * different organization) — do NOT let the query proceed with an untrusted ID.
+ *
  * @param cursor - The encoded cursor string
  * @param activeOrgId - The organization ID of the requesting user
  * @param prisma - Prisma client instance
@@ -252,8 +266,7 @@ export async function validateCursorOrganization(
 
     // Verify the record belongs to the requesting organization
     return record.organizationId === activeOrgId;
-  } catch (error) {
-    console.error(`Error validating cursor for ${tableName}:`, error);
+  } catch {
     return false;
   }
 }

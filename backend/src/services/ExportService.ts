@@ -1,6 +1,5 @@
 import { Response } from 'express';
 import { Readable } from 'stream';
-import { prisma } from '../lib/prisma';
 import { replicaClient } from '../lib/readReplica';
 import { paginatedQuery } from '../lib/paginatedQuery';
 
@@ -61,7 +60,7 @@ export const ExportService = {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="analytics.jsonl"',
     });
-    await pump(stream, (args) => prisma.analyticsEntry.findMany({ where, ...args }), (row) =>
+    await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',
     );
   },
@@ -98,7 +97,7 @@ export const ExportService = {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="posts.jsonl"',
     });
-    await pump(stream, (args) => prisma.post.findMany({ where, ...args }), (row) =>
+    await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',
     );
   },

@@ -6,6 +6,9 @@ import { checkPermission } from '../middleware/checkPermission';
 import { videoService } from '../services/VideoService';
 import { videoQueue } from '../queues/VideoQueue';
 import { videoHealthService } from '../services/VideoHealthService';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('video-route');
 
 const router = Router();
 
@@ -97,7 +100,7 @@ router.post('/upload', authMiddleware, checkPermission('posts:create'), upload.s
       status: 'pending',
     });
   } catch (error) {
-    console.error('Upload error:', error);
+    logger.error('Upload error', { error });
     res.status(500).json({ error: 'Failed to upload video' });
   }
 });
