@@ -14,6 +14,7 @@ export interface IPFSUploadResult {
   cid: string
   size: number
   gatewayUrl: string
+  error?: string
 }
 
 export const DEFAULT_GATEWAYS = [

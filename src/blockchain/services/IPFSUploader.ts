@@ -133,7 +133,12 @@ export class IPFSUploader {
           const res = await this.uploadFile(files[i], (_u, _t) => {})
           results[i] = res
         } catch (e) {
-          results[i] = { cid: '', size: files[i].size, gatewayUrl: '' }
+          results[i] = {
+            cid: '',
+            size: files[i].size,
+            gatewayUrl: '',
+            error: e instanceof Error ? e.message : String(e),
+          }
         }
         completed++
         if (onProgress) onProgress(completed, files.length)
