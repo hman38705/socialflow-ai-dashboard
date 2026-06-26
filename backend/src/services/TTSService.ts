@@ -47,9 +47,13 @@ class TTSService {
     logger.info(`TTS job created`, { jobId, segments: req.segments.length });
 
     // Fire-and-forget — errors are caught and stored on the job
-    this.processJob(jobId).catch((err) => {
+    this.processJob(jobId).catch(async (err) => {
       logger.error(`TTS job ${jobId} failed unexpectedly`, { err });
-      this.updateStatus(jobId, 'failed', String(err?.message ?? err));
+      try {
+        await this.updateStatus(jobId, 'failed', String(err?.message ?? err));
+      } catch (statusErr) {
+        logger.error(`TTS job ${jobId} failed to persist failure status`, { statusErr });
+      }
     });
 
     return jobId;
@@ -232,7 +236,7 @@ class TTSService {
     );
   }
 
-  private updateStatus(jobId: string, status: TTSJobStatus, error?: string): void {
+  private async updateStatus(jobId: string, status: TTSJobStatus, error?: string): Promise<void> {
     const job = this.jobs.get(jobId);
     if (!job) return;
     job.status = status;

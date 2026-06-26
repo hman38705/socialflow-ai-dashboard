@@ -106,6 +106,13 @@ export const filesArchivedTotal = new Counter({
   registers: [register],
 });
 
+export const webhookDispatchFailed = new Counter({
+  name: 'webhook_dispatch_failed_total',
+  help: 'Total number of webhook delivery attempts that failed with an unexpected dispatcher error',
+  labelNames: ['subscription_id'] as const,
+  registers: [register],
+});
+
 /** Map a request path to an SLI category. */
 export function resolveCategory(path: string): string {
   if (/^\/(health|status)/.test(path) || /\/health/.test(path)) return 'health';
