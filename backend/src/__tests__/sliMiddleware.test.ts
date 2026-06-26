@@ -20,14 +20,16 @@ jest.mock('../lib/logger', () => ({
 
 function makeRes(statusCode: number) {
   const listeners: Record<string, (() => void)[]> = {};
-  return {
+  const res = {
     statusCode,
+    writeHead: jest.fn(),
     on: (event: string, cb: () => void) => {
       listeners[event] = listeners[event] ?? [];
       listeners[event].push(cb);
     },
     emit: (event: string) => listeners[event]?.forEach(cb => cb()),
   };
+  return res;
 }
 
 function makeReq() {
@@ -90,5 +92,23 @@ describe('sliMiddleware', () => {
     const res = makeRes(200);
     sliMiddleware(makeReq(), res as unknown as Response, next as NextFunction);
     expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  it('measures duration up to writeHead, not body flush', async () => {
+    jest.useFakeTimers();
+    const res = makeRes(200);
+    sliMiddleware(makeReq(), res as unknown as Response, jest.fn() as NextFunction);
+
+    jest.advanceTimersByTime(50);
+    // simulate headers sent after 50 ms of server processing
+    (res as any).writeHead(200);
+
+    // slow client: body flushes 500 ms later
+    jest.advanceTimersByTime(500);
+    res.emit('finish');
+
+    const [, durationMs] = mockObserveSuccess.mock.calls[0];
+    expect(durationMs).toBeLessThan(200); // ~50 ms, not ~550 ms
+    jest.useRealTimers();
   });
 });
