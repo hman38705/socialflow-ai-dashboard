@@ -21,6 +21,9 @@ export class DynamicConfigService {
   private isPollingActive: boolean = false;
   private lastRefreshTimestamp: Date | null = null;
   private changeListeners: Map<string, ChangeListener[]> = new Map();
+  // Tracks the in-flight initialization so public methods can guard against
+  // reading the cache before the first refreshCache() completes.
+  private readyPromise: Promise<void> = Promise.resolve();
 
   private constructor(private refreshIntervalMs: number = 60000) {
     // Default 1 minute
@@ -30,10 +33,14 @@ export class DynamicConfigService {
   /**
    * Factory method that creates an instance with the cache already populated.
    * Use this instead of `new DynamicConfigService(...)`.
+   * The readyPromise is stored on the instance so callers who somehow obtain a
+   * reference before this factory resolves can still await initialization via
+   * instance.readyPromise before reading the cache.
    */
   public static async create(refreshIntervalMs: number = 60000): Promise<DynamicConfigService> {
     const instance = new DynamicConfigService(refreshIntervalMs);
-    await instance.refreshCache();
+    instance.readyPromise = instance.refreshCache();
+    await instance.readyPromise;
     return instance;
   }
 

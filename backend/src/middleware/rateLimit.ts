@@ -111,10 +111,10 @@ export async function checkRateLimiterStore(
       'Rate limiter Redis store is unavailable — falling back to in-memory store. ' +
       'Rate limits will NOT be shared across instances.';
     if (process.env.NODE_ENV === 'production') {
-      console.error(`[rateLimit] FATAL: ${msg}`);
+      logger.error('Rate limiter Redis store unavailable', { msg });
       exit(1);
     } else {
-      console.warn(`[rateLimit] WARNING: ${msg}`);
+      logger.warn('Rate limiter Redis store unavailable, falling back to in-memory', { msg });
     }
   }
 }

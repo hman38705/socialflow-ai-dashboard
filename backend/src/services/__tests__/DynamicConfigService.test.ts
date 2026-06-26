@@ -1,9 +1,12 @@
 import { DynamicConfigService } from '../DynamicConfigService';
+import { prisma } from '../../lib/prisma';
 
 // Prevent real DB calls
 jest.mock('../../lib/prisma', () => ({
   prisma: { dynamicConfig: { findMany: jest.fn().mockResolvedValue([]) } },
 }));
+
+const mockFindMany = (prisma as any).dynamicConfig.findMany as jest.Mock;
 
 describe('DynamicConfigService – poll interval', () => {
   beforeEach(() => jest.useFakeTimers());
@@ -79,5 +82,51 @@ describe('DynamicConfigService – poll interval', () => {
     expect(cfg.DYNAMIC_CONFIG_POLL_INTERVAL_MS).toBe(60000);
 
     process.env.DYNAMIC_CONFIG_POLL_INTERVAL_MS = saved;
+  });
+});
+
+describe('DynamicConfigService – readyPromise guard', () => {
+  afterEach(() => {
+    mockFindMany.mockReset();
+    mockFindMany.mockResolvedValue([]);
+  });
+
+  it('readyPromise is set by create() and resolves to post-refresh data', async () => {
+    mockFindMany.mockResolvedValue([{ key: 'rp-key', value: 'rp-value', type: 'string' }]);
+
+    const svc = await DynamicConfigService.create();
+
+    await (svc as any).readyPromise;
+    expect(svc.get('rp-key')).toBe('rp-value');
+
+    svc.stopPolling();
+  });
+
+  it('get() returns post-refresh data after awaiting readyPromise on a pre-init instance', async () => {
+    let resolveRefresh!: () => void;
+    const refreshDelay = new Promise<void>((r) => {
+      resolveRefresh = r;
+    });
+
+    mockFindMany.mockImplementationOnce(() =>
+      refreshDelay.then(() => [{ key: 'guard-key', value: 'guard-value', type: 'string' }]),
+    );
+
+    // Bypass create() to simulate obtaining the instance before initialization
+    // completes — the scenario the readyPromise guard defends against.
+    const svc = new (DynamicConfigService as any)(60000) as DynamicConfigService;
+    (svc as any).readyPromise = (svc as any).refreshCache();
+
+    // Before refresh: cache is empty, get() returns null (hardcoded default)
+    expect(svc.get('guard-key')).toBeNull();
+
+    // Resolve the delayed refresh
+    resolveRefresh();
+    await (svc as any).readyPromise;
+
+    // After readyPromise settles: get() returns the post-refresh value
+    expect(svc.get('guard-key')).toBe('guard-value');
+
+    svc.stopPolling();
   });
 });

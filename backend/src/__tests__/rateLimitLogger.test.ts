@@ -173,3 +173,72 @@ describe('rateLimit + logger — both optional deps missing', () => {
     expect(res.body.status).toBe('ok');
   });
 });
+
+// ---------------------------------------------------------------------------
+// 5. checkRateLimiterStore uses structured logger instead of console
+// ---------------------------------------------------------------------------
+describe('checkRateLimiterStore – structured logger', () => {
+  const mockLoggerWarn = jest.fn();
+  const mockLoggerError = jest.fn();
+
+  beforeEach(() => {
+    jest.resetModules();
+    jest.mock('../lib/logger', () => ({
+      createLogger: jest.fn(() => ({
+        info: jest.fn(),
+        warn: mockLoggerWarn,
+        error: mockLoggerError,
+      })),
+    }));
+    jest.mock('rate-limit-redis', () => {
+      throw new Error("Cannot find module 'rate-limit-redis'");
+    });
+    mockLoggerWarn.mockClear();
+    mockLoggerError.mockClear();
+  });
+
+  afterEach(() => {
+    jest.unmock('../lib/logger');
+    jest.unmock('rate-limit-redis');
+    jest.resetModules();
+  });
+
+  it('calls logger.warn (not console.warn) in non-production when Redis store is unavailable', async () => {
+    const consoleSpy = jest.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const { checkRateLimiterStore } = freshRequire<typeof import('../middleware/rateLimit')>(
+      '../middleware/rateLimit',
+    );
+    await checkRateLimiterStore(() => {});
+
+    expect(mockLoggerWarn).toHaveBeenCalledWith(
+      expect.stringContaining('Rate limiter Redis store unavailable'),
+      expect.any(Object),
+    );
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+  });
+
+  it('calls logger.error (not console.error) and invokes exit in production when Redis store is unavailable', async () => {
+    const savedEnv = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const consoleSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
+
+    const { checkRateLimiterStore } = freshRequire<typeof import('../middleware/rateLimit')>(
+      '../middleware/rateLimit',
+    );
+    const mockExit = jest.fn();
+    await checkRateLimiterStore(mockExit);
+
+    expect(mockLoggerError).toHaveBeenCalledWith(
+      expect.stringContaining('Rate limiter Redis store unavailable'),
+      expect.any(Object),
+    );
+    expect(mockExit).toHaveBeenCalledWith(1);
+    expect(consoleSpy).not.toHaveBeenCalled();
+
+    consoleSpy.mockRestore();
+    process.env.NODE_ENV = savedEnv;
+  });
+});

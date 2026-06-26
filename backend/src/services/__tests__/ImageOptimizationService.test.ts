@@ -1,4 +1,5 @@
 import { ImageOptimizationService } from '../ImageOptimizationService';
+import { BadRequestError } from '../../lib/errors';
 import fs from 'fs/promises';
 
 jest.mock('sharp');
@@ -102,6 +103,37 @@ describe('ImageOptimizationService', () => {
       const size = await ImageOptimizationService.getCacheSize();
 
       expect(size).toBe(0);
+    });
+  });
+
+  describe('format validation', () => {
+    it('throws BadRequestError for an invalid format string', async () => {
+      await expect(
+        ImageOptimizationService.optimize('/path/to/img.jpg', { format: 'gif' as any }),
+      ).rejects.toThrow(BadRequestError);
+
+      await expect(
+        ImageOptimizationService.optimize('/path/to/img.jpg', { format: 'gif' as any }),
+      ).rejects.toThrow(/Invalid image format/);
+    });
+
+    it('does not throw for valid format values', async () => {
+      const cachedBuffer = Buffer.from('cached-data');
+      (fs.readFile as jest.Mock).mockResolvedValue(cachedBuffer);
+
+      for (const fmt of ['webp', 'jpeg', 'png'] as const) {
+        await expect(
+          ImageOptimizationService.optimize('/path/to/img.jpg', { format: fmt }),
+        ).resolves.toMatchObject({ format: fmt });
+      }
+    });
+
+    it('defaults to webp when format is omitted', async () => {
+      const cachedBuffer = Buffer.from('cached-data');
+      (fs.readFile as jest.Mock).mockResolvedValue(cachedBuffer);
+
+      const result = await ImageOptimizationService.optimize('/path/to/img.jpg', {});
+      expect(result.format).toBe('webp');
     });
   });
 });
