@@ -213,3 +213,47 @@ export function decodeCursor(cursor: string): TimestampCursor | null {
     return null;
   }
 }
+
+/**
+ * Validate that a cursor belongs to the requesting organization.
+ * Queries the database to verify the record exists and belongs to activeOrgId.
+ * 
+ * @param cursor - The encoded cursor string
+ * @param activeOrgId - The organization ID of the requesting user
+ * @param prisma - Prisma client instance
+ * @param tableName - The table to query (e.g., 'posts', 'comments')
+ * @returns true if cursor is valid and belongs to the organization, false otherwise
+ */
+export async function validateCursorOrganization(
+  cursor: string | undefined,
+  activeOrgId: string,
+  prisma: any,
+  tableName: string
+): Promise<boolean> {
+  if (!cursor) {
+    return true; // No cursor provided is valid
+  }
+
+  const decoded = decodeCursor(cursor);
+  if (!decoded) {
+    return false; // Malformed cursor
+  }
+
+  try {
+    // Query the database to verify the record exists and belongs to the organization
+    const record = await prisma[tableName].findUnique({
+      where: { id: decoded.id },
+      select: { organizationId: true },
+    });
+
+    if (!record) {
+      return false; // Record not found
+    }
+
+    // Verify the record belongs to the requesting organization
+    return record.organizationId === activeOrgId;
+  } catch (error) {
+    console.error(`Error validating cursor for ${tableName}:`, error);
+    return false;
+  }
+}

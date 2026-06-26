@@ -1,7 +1,20 @@
-import { Router, Request, Response } from 'express';
+import { Router, Response, NextFunction } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { orgMiddleware } from '../middleware/orgMiddleware';
+import { checkPermission } from '../middleware/checkPermission';
 import { ExportService } from '../services/ExportService';
+import { AuthRequest } from '../middleware/authMiddleware';
 
 const router = Router();
+
+/** Asserts req.activeOrgId is set — orgMiddleware must run first. */
+function requireActiveOrg(req: AuthRequest, res: Response, next: NextFunction): void {
+  if (!req.activeOrgId) {
+    res.status(403).json({ error: 'No active organization' });
+    return;
+  }
+  next();
+}
 
 /**
  * @openapi
@@ -10,11 +23,6 @@ const router = Router();
  *     tags: [Exports]
  *     summary: Stream analytics data as CSV or JSON
  *     parameters:
- *       - in: query
- *         name: organizationId
- *         required: true
- *         schema:
- *           type: string
  *       - in: query
  *         name: format
  *         required: true
@@ -39,45 +47,50 @@ const router = Router();
  *       400:
  *         description: Validation error
  */
-router.get('/analytics', async (req: Request, res: Response) => {
-  try {
-    const { organizationId, format, startDate, endDate } = req.query;
+// Required permission: analytics:export
+router.get(
+  '/analytics',
+  authMiddleware,
+  orgMiddleware,
+  requireActiveOrg,
+  checkPermission('analytics:export'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { format, startDate, endDate } = req.query;
+      const organizationId = req.activeOrgId!;
 
-    if (!organizationId || typeof organizationId !== 'string') {
-      return res.status(400).json({ error: 'organizationId is required' });
-    }
+      if (!format || !['csv', 'json'].includes(format as string)) {
+        return res.status(400).json({ error: 'format must be "csv" or "json"' });
+      }
 
-    if (!format || !['csv', 'json'].includes(format as string)) {
-      return res.status(400).json({ error: 'format must be "csv" or "json"' });
-    }
+      if (!startDate || typeof startDate !== 'string') {
+        return res.status(400).json({ error: 'startDate is required (ISO format)' });
+      }
 
-    if (!startDate || typeof startDate !== 'string') {
-      return res.status(400).json({ error: 'startDate is required (ISO format)' });
-    }
+      if (!endDate || typeof endDate !== 'string') {
+        return res.status(400).json({ error: 'endDate is required (ISO format)' });
+      }
 
-    if (!endDate || typeof endDate !== 'string') {
-      return res.status(400).json({ error: 'endDate is required (ISO format)' });
-    }
+      const start = new Date(startDate);
+      const end = new Date(endDate);
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format' });
+      }
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format' });
+      if (format === 'csv') {
+        await ExportService.streamAnalyticsAsCSV(organizationId, start, end, res);
+      } else {
+        await ExportService.streamAnalyticsAsJSON(organizationId, start, end, res);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Export failed' });
+      }
     }
-
-    if (format === 'csv') {
-      await ExportService.streamAnalyticsAsCSV(organizationId, start, end, res);
-    } else {
-      await ExportService.streamAnalyticsAsJSON(organizationId, start, end, res);
-    }
-  } catch (error) {
-    console.error('Export error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Export failed' });
-    }
-  }
-});
+  },
+);
 
 /**
  * @openapi
@@ -86,11 +99,6 @@ router.get('/analytics', async (req: Request, res: Response) => {
  *     tags: [Exports]
  *     summary: Stream posts data as CSV or JSON
  *     parameters:
- *       - in: query
- *         name: organizationId
- *         required: true
- *         schema:
- *           type: string
  *       - in: query
  *         name: format
  *         required: true
@@ -115,44 +123,49 @@ router.get('/analytics', async (req: Request, res: Response) => {
  *       400:
  *         description: Validation error
  */
-router.get('/posts', async (req: Request, res: Response) => {
-  try {
-    const { organizationId, format, startDate, endDate } = req.query;
+// Required permission: analytics:export
+router.get(
+  '/posts',
+  authMiddleware,
+  orgMiddleware,
+  requireActiveOrg,
+  checkPermission('analytics:export'),
+  async (req: AuthRequest, res: Response) => {
+    try {
+      const { format, startDate, endDate } = req.query;
+      const organizationId = req.activeOrgId!;
 
-    if (!organizationId || typeof organizationId !== 'string') {
-      return res.status(400).json({ error: 'organizationId is required' });
-    }
+      if (!format || !['csv', 'json'].includes(format as string)) {
+        return res.status(400).json({ error: 'format must be "csv" or "json"' });
+      }
 
-    if (!format || !['csv', 'json'].includes(format as string)) {
-      return res.status(400).json({ error: 'format must be "csv" or "json"' });
-    }
+      if (!startDate || typeof startDate !== 'string') {
+        return res.status(400).json({ error: 'startDate is required (ISO format)' });
+      }
 
-    if (!startDate || typeof startDate !== 'string') {
-      return res.status(400).json({ error: 'startDate is required (ISO format)' });
-    }
+      if (!endDate || typeof endDate !== 'string') {
+        return res.status(400).json({ error: 'endDate is required (ISO format)' });
+      }
 
-    if (!endDate || typeof endDate !== 'string') {
-      return res.status(400).json({ error: 'endDate is required (ISO format)' });
-    }
+      const start = new Date(startDate);
+      const end = new Date(endDate);
 
-    const start = new Date(startDate);
-    const end = new Date(endDate);
+      if (isNaN(start.getTime()) || isNaN(end.getTime())) {
+        return res.status(400).json({ error: 'Invalid date format' });
+      }
 
-    if (isNaN(start.getTime()) || isNaN(end.getTime())) {
-      return res.status(400).json({ error: 'Invalid date format' });
+      if (format === 'csv') {
+        await ExportService.streamPostsAsCSV(organizationId, start, end, res);
+      } else {
+        await ExportService.streamPostsAsJSON(organizationId, start, end, res);
+      }
+    } catch (error) {
+      console.error('Export error:', error);
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Export failed' });
+      }
     }
-
-    if (format === 'csv') {
-      await ExportService.streamPostsAsCSV(organizationId, start, end, res);
-    } else {
-      await ExportService.streamPostsAsJSON(organizationId, start, end, res);
-    }
-  } catch (error) {
-    console.error('Export error:', error);
-    if (!res.headersSent) {
-      res.status(500).json({ error: 'Export failed' });
-    }
-  }
-});
+  },
+);
 
 export default router;

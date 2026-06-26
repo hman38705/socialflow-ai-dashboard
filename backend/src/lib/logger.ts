@@ -45,7 +45,7 @@ if (config.ELASTICSEARCH_URL) {
             : undefined,
         // Trust self-signed certs in dev/staging; enforce TLS in production
         tls: {
-          rejectUnauthorized: process.env.ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED !== 'false',
+          rejectUnauthorized: config.ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED !== 'false',
         },
       },
       // Map Winston levels to ECS-compatible severity

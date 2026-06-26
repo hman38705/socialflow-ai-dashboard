@@ -1,4 +1,5 @@
 import { prisma } from '../lib/prisma';
+import { replicaClient } from '../lib/readReplica';
 import { PageLimitParams, toSkipTake } from '../utils/pagination';
 
 export class ListingService {
@@ -10,6 +11,7 @@ export class ListingService {
    * @param orgId Organization scope
    */
   async toggleVisibility(listingId: string, mentorId: string, isActive: boolean, orgId?: string) {
+    // Write operation — use primary
     const listing = await prisma.listing.findUnique({ where: { id: listingId } });
 
     if (!listing) {
@@ -39,6 +41,7 @@ export class ListingService {
     params: PageLimitParams,
     orgId?: string,
   ): Promise<{ data: any[]; total: number }> {
+    // Read-only operation — use read replica
     const q = query.trim();
     const where = {
       isActive: true,
@@ -56,8 +59,8 @@ export class ListingService {
     const orgArgs = orgId ? { ...baseArgs, __orgId: orgId } : baseArgs;
 
     const [total, data] = await Promise.all([
-      prisma.listing.count(orgId ? ({ where, __orgId: orgId } as any) : { where }),
-      prisma.listing.findMany(orgArgs as any),
+      replicaClient.listing.count(orgId ? ({ where, __orgId: orgId } as any) : { where }),
+      replicaClient.listing.findMany(orgArgs as any),
     ]);
 
     return { data, total };

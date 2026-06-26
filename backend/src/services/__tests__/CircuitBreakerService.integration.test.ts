@@ -13,7 +13,7 @@
  * created with the fast config; subsequent execute() calls reuse it.
  */
 
-// Bypass the manual mock in src/__tests__/__mocks__/opossum.js so the real
+// Bypass the manual mock in src/__tests__/__mocks__/opossum.ts so the real
 // opossum library is used for these integration tests.
 jest.unmock('opossum');
 

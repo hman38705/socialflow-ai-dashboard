@@ -22,10 +22,19 @@ export class DynamicConfigService {
   private lastRefreshTimestamp: Date | null = null;
   private changeListeners: Map<string, ChangeListener[]> = new Map();
 
-  constructor(private refreshIntervalMs: number = 60000) {
+  private constructor(private refreshIntervalMs: number = 60000) {
     // Default 1 minute
-    this.refreshCache().catch(console.error);
     this.startPolling();
+  }
+
+  /**
+   * Factory method that creates an instance with the cache already populated.
+   * Use this instead of `new DynamicConfigService(...)`.
+   */
+  public static async create(refreshIntervalMs: number = 60000): Promise<DynamicConfigService> {
+    const instance = new DynamicConfigService(refreshIntervalMs);
+    await instance.refreshCache();
+    return instance;
   }
 
   /**
@@ -44,13 +53,20 @@ export class DynamicConfigService {
 
   /**
    * Starts periodic polling of the database for configuration changes.
+   * Polling is disabled in the test environment to avoid DB noise.
+   * A ±20% jitter is applied to the interval to prevent thundering herd
+   * when multiple replicas start simultaneously.
    */
   public startPolling(): void {
     if (this.pollingInterval) return;
+    if (process.env.NODE_ENV === 'test') return;
+
+    const jitter = this.refreshIntervalMs * 0.2 * (Math.random() * 2 - 1); // ±20%
+    const interval = this.refreshIntervalMs + jitter;
 
     this.pollingInterval = setInterval(async () => {
       await this.refreshCache();
-    }, this.refreshIntervalMs);
+    }, interval);
   }
 
   /**
@@ -75,7 +91,7 @@ export class DynamicConfigService {
       // Ensure the DynamicConfig table exists after the migration.
       const configs = await (prisma as any).dynamicConfig.findMany();
 
-      this.cache.clear();
+      const newCache = new Map<string, any>();
       for (const config of configs) {
         newCache.set(config.key, this.parseValue(config.value, config.type as ConfigType));
       }
@@ -87,6 +103,9 @@ export class DynamicConfigService {
           this.notifyListeners(key, newVal);
         }
       }
+
+      // Replace the live cache with the refreshed data
+      this.cache = newCache;
 
       this.lastRefreshTimestamp = new Date();
       console.log(
@@ -213,7 +232,24 @@ export class DynamicConfigService {
   }
 }
 
-// Export a singleton instance — interval read from env so no code change needed
-export const dynamicConfigService = new DynamicConfigService(
-  config.DYNAMIC_CONFIG_POLL_INTERVAL_MS,
-);
+// Singleton — initialized with the factory so the cache is populated before first use.
+let _dynamicConfigServicePromise: Promise<DynamicConfigService> | null = null;
+let _dynamicConfigServiceInstance: DynamicConfigService | null = null;
+
+export async function getDynamicConfigService(): Promise<DynamicConfigService> {
+  if (!_dynamicConfigServicePromise) {
+    _dynamicConfigServicePromise = DynamicConfigService.create(
+      config.DYNAMIC_CONFIG_POLL_INTERVAL_MS,
+    ).then(instance => {
+      _dynamicConfigServiceInstance = instance;
+      return instance;
+    });
+  }
+  return _dynamicConfigServicePromise;
+}
+
+// For synchronous access once the service has been initialized.
+// Returns null if the service hasn't been created yet.
+(DynamicConfigService as any).getCachedInstance = (): DynamicConfigService | null => {
+  return _dynamicConfigServiceInstance;
+};

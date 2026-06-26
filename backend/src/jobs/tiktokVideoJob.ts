@@ -99,7 +99,47 @@ export const startTikTokVideoWorker = (): void => {
 async function handleVideoUpload(job: Job): Promise<void> {
   const { accessToken, filePath, fileSizeBytes, request } = job.data as TikTokVideoJobPayload;
 
-  logger.info('Starting TikTok chunked video upload', { filePath, fileSizeBytes });
+  // Derive a stable session key from the file path so that retries of the
+  // same job can resume the same TikTok upload session.
+  const sessionKey = Buffer.from(filePath).toString('base64').slice(0, 64);
+
+  let publishId: string;
+  let uploadUrl: string;
+  let chunkSize: number;
+  let totalChunks: number;
+  let startChunk = 0;
+
+  // Check whether a previous attempt stored an upload session for this file.
+  const existingSession = await tiktokService.getUploadSession(sessionKey);
+
+  if (existingSession) {
+    ({ publishId, uploadUrl, chunkSize, totalChunks } = existingSession);
+    const lastChunk = await tiktokService.getLastUploadedChunk(publishId);
+    startChunk = lastChunk + 1;
+
+    logger.info('Resuming TikTok chunked upload from last successful chunk', {
+      filePath,
+      resumeChunk: startChunk + 1,
+      totalChunks,
+      publishId,
+    });
+  } else {
+    logger.info('Starting TikTok chunked video upload', { filePath, fileSizeBytes });
+
+    // Initiate a new upload session and persist it so retries can resume.
+    ({ publishId, uploadUrl, chunkSize, totalChunks } = await tiktokService.initiateVideoUpload(
+      accessToken,
+      fileSizeBytes,
+      request,
+    ));
+
+    await tiktokService.storeUploadSession(sessionKey, {
+      publishId,
+      uploadUrl,
+      chunkSize,
+      totalChunks,
+    });
+  }
 
   // Dispatch processing event
   await dispatchEvent('tiktok.video_processing', {
@@ -108,17 +148,10 @@ async function handleVideoUpload(job: Job): Promise<void> {
     status: 'uploading',
   });
 
-  // Initiate upload and get upload URL + publishId
-  const { publishId, uploadUrl, chunkSize, totalChunks } = await tiktokService.initiateVideoUpload(
-    accessToken,
-    fileSizeBytes,
-    request,
-  );
-
-  // Read and upload file in chunks
+  // Read and upload file in chunks, starting from the resume point.
   const fileHandle = await fs.promises.open(filePath, 'r');
   try {
-    for (let i = 0; i < totalChunks; i++) {
+    for (let i = startChunk; i < totalChunks; i++) {
       const buffer = Buffer.alloc(Math.min(chunkSize, fileSizeBytes - i * chunkSize));
       await fileHandle.read(buffer, 0, buffer.length, i * chunkSize);
       await tiktokService.uploadChunk(uploadUrl, buffer, i, totalChunks, fileSizeBytes, publishId);
@@ -126,12 +159,21 @@ async function handleVideoUpload(job: Job): Promise<void> {
       // Report progress
       await job.updateProgress(Math.round(((i + 1) / totalChunks) * 100));
     }
+  } catch (error) {
+    // Clean up progress on upload failure
+    await tiktokService.clearUploadProgress(publishId);
+    logger.error('TikTok video upload failed, progress cleaned up', {
+      publishId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    throw error;
   } finally {
     await fileHandle.close();
   }
 
-  // Clear progress tracking now that all chunks are confirmed
+  // Clear progress tracking and session now that all chunks are confirmed.
   await tiktokService.clearUploadProgress(publishId);
+  await tiktokService.clearUploadSession(sessionKey);
 
   logger.info('All chunks uploaded, queuing status poll', { publishId });
 

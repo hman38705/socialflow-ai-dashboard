@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { analyzeImage, GeminiServiceError } from '../services/geminiService';
 import { authMiddleware } from '../middleware/authMiddleware';
+import { checkPermission } from '../middleware/checkPermission';
 
 const router = Router();
 
@@ -14,9 +15,11 @@ const router = Router();
  *   mimeType    {string}  MIME type, e.g. "image/jpeg" (optional, default: "image/jpeg")
  *   context     {string}  Optional prompt context to guide caption style/topic
  */
+// Required permission: posts:create
 router.post(
   '/analyze-image',
   authMiddleware,
+  checkPermission('posts:create'),
   async (req: Request, res: Response) => {
     const { imageData, mimeType, context } = req.body;
 

@@ -6,7 +6,7 @@ import { redactSensitiveFields } from '../utils/redactSensitiveFields';
 
 /**
  * Middleware factory that records an audit log entry after the response is sent.
- * Must be used after `authMiddleware` (requires req.userId).
+ * Must be used after `authMiddleware` (requires req.user.id).
  *
  * Sensitive fields (password, token, cardNumber, cvv, secret) are automatically
  * redacted from any metadata before it is written to the audit log.
@@ -28,12 +28,17 @@ export function audit(
       // Only log on successful (2xx) responses
       if (res.statusCode >= 200 && res.statusCode < 300) {
         const rawMetadata = metadata?.(req);
+        const enrichedMetadata: Record<string, unknown> = {
+          ...(rawMetadata ?? {}),
+          ...(req.activeOrgId ? { orgId: req.activeOrgId } : {}),
+        };
         auditLogger.log({
-          actorId: req.userId ?? 'anonymous',
+          actorId: req.user?.id ?? 'anonymous',
           action,
+          organizationId: req.activeOrgId,
           resourceType,
           resourceId: resourceId?.(req),
-          metadata: rawMetadata ? redactSensitiveFields(rawMetadata) : undefined,
+          metadata: redactSensitiveFields(enrichedMetadata),
           ip: req.ip,
           userAgent: req.headers['user-agent'],
         });

@@ -4,7 +4,10 @@ import { ServiceUnavailableError } from '../lib/errors';
 
 const logger = createLogger('instagram-service');
 
-const API_BASE = 'https://graph.facebook.com/v18.0';
+const FB_API_VERSION = process.env.FACEBOOK_API_VERSION ?? 'v18.0';
+const API_BASE = `https://graph.facebook.com/${FB_API_VERSION}`;
+
+logger.info(`InstagramService using Graph API version ${FB_API_VERSION}`);
 
 // ---------------------------------------------------------------------------
 // Types
@@ -103,7 +106,7 @@ class InstagramService {
         'pages_read_engagement',
       ].join(','),
     });
-    return `https://www.facebook.com/v18.0/dialog/oauth?${params}`;
+    return `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth?${params}`;
   }
 
   /**

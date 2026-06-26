@@ -1,10 +1,67 @@
 import crypto from 'crypto';
+import { isIP } from 'net';
+import dns from 'dns/promises';
 import { prisma } from '../lib/prisma';
 import { createLogger } from '../lib/logger';
 import { webhookDispatchFailed } from '../lib/metrics';
 import { WebhookEventType } from '../schemas/webhooks';
 
 const logger = createLogger('WebhookDispatcher');
+
+// RFC 1918 + loopback + link-local CIDRs blocked to prevent SSRF
+const BLOCKED_CIDRS: Array<{ base: number; mask: number }> = [
+  { base: ipToInt('10.0.0.0'), mask: 0xff000000 },
+  { base: ipToInt('172.16.0.0'), mask: 0xfff00000 },
+  { base: ipToInt('192.168.0.0'), mask: 0xffff0000 },
+  { base: ipToInt('127.0.0.0'), mask: 0xff000000 },
+  { base: ipToInt('169.254.0.0'), mask: 0xffff0000 },
+  { base: ipToInt('0.0.0.0'), mask: 0xff000000 },
+];
+
+function ipToInt(ip: string): number {
+  return ip.split('.').reduce((acc, octet) => (acc << 8) | parseInt(octet, 10), 0) >>> 0;
+}
+
+function isPrivateIPv4(ip: string): boolean {
+  if (isIP(ip) !== 4) return false;
+  const n = ipToInt(ip);
+  return BLOCKED_CIDRS.some(({ base, mask }) => (n & mask) === base);
+}
+
+async function assertSafeUrl(url: string): Promise<void> {
+  let parsed: URL;
+  try {
+    parsed = new URL(url);
+  } catch {
+    throw new Error(`Invalid webhook URL: ${url}`);
+  }
+
+  if (parsed.protocol !== 'https:') {
+    throw new Error(`Webhook URL must use https (got ${parsed.protocol}): ${url}`);
+  }
+
+  const hostname = parsed.hostname;
+
+  if (isIP(hostname) === 4) {
+    if (isPrivateIPv4(hostname)) {
+      throw new Error(`Webhook URL resolves to a blocked address: ${url}`);
+    }
+    return;
+  }
+
+  let addresses: string[];
+  try {
+    addresses = await dns.resolve4(hostname);
+  } catch {
+    throw new Error(`Webhook URL hostname could not be resolved: ${hostname}`);
+  }
+
+  for (const addr of addresses) {
+    if (isPrivateIPv4(addr)) {
+      throw new Error(`Webhook URL resolves to a blocked address (${addr}): ${url}`);
+    }
+  }
+}
 
 const MAX_ATTEMPTS = 5;
 const TIMEOUT_MS = 10_000; // 10 s per request
@@ -87,6 +144,18 @@ export async function attemptDelivery(
   payload: string,
   attempt: number,
 ): Promise<void> {
+  try {
+    await assertSafeUrl(url);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error(`Delivery ${deliveryId} blocked — unsafe URL`, { url, errorMessage });
+    await prisma.webhookDelivery.update({
+      where: { id: deliveryId },
+      data: { status: 'failed', attempts: attempt, nextRetryAt: null, errorMessage },
+    });
+    return;
+  }
+
   const signature = sign(secret, payload);
 
   let responseStatus: number | undefined;

@@ -4,10 +4,10 @@ import { config } from './config/config';
 import app from './app';
 import { SocketService } from './services/SocketService';
 import { initializeWorkers } from './jobs/workers';
-import { startWorkers } from './workers/index';
 import { queueManager, closeRedisClient } from './queues/queueManager';
 import { startDataPruningJob, stopDataPruningJob } from './jobs/dataPruningJob';
 import { startYouTubeSyncJob, stopYouTubeSyncJob } from './jobs/youtubeSyncJob';
+import { startPlatformMedianJob, stopPlatformMedianJob } from './jobs/platformMedianJob';
 import { startTikTokVideoWorker } from './jobs/tiktokVideoJob';
 import { startVideoWorker } from './services/VideoService';
 import { startTwitterWebhookWorker } from './queues/twitterWebhookQueue';
@@ -16,10 +16,12 @@ import { startHealthMonitoringJob, stopHealthMonitoringJob } from './jobs/health
 import { initializeHealthMonitoring } from './monitoring/healthMonitoringInstance';
 import { createLogger } from './lib/logger';
 import { prisma } from './lib/prisma';
+import { initDirectories } from './utils/initDirectories';
 import { Worker } from 'bullmq';
 import { Server } from 'http';
 import { createSmsService } from './services/smsService';
 import { initialize2FaLockoutStore } from './services/TwoFactorLockoutInit';
+import { checkRateLimiterStore } from './middleware/rateLimit';
 
 const logger = createLogger('server');
 const PORT = config.BACKEND_PORT;
@@ -49,7 +51,7 @@ export const gracefulShutdown = async (
   opts?: { exit?: (code: number) => void; timeoutMs?: number },
 ): Promise<void> => {
   const doExit = opts?.exit ?? ((code) => process.exit(code));
-  const timeoutMs = opts?.timeoutMs ?? 30000;
+  const timeoutMs = opts?.timeoutMs ?? 270000;
   const srv = deps?.server ?? serverInstance;
   const ww = deps?.webhookWorker ?? webhookWorker;
   const tww = deps?.twitterWebhookWorker ?? twitterWebhookWorker;
@@ -133,6 +135,14 @@ export const gracefulShutdown = async (
       logger.error('Failed to stop YouTube sync job', { error: error instanceof Error ? error.message : String(error) });
     }
 
+    // Stop platform median job
+    try {
+      await stopPlatformMedianJob();
+      logger.info('Platform median job stopped');
+    } catch (error) {
+      logger.error('Failed to stop platform median job', { error: error instanceof Error ? error.message : String(error) });
+    }
+
     // Close job queues and workers
     try {
       await queueManager.closeAll();
@@ -211,12 +221,27 @@ process.on('SIGTERM', () => {
 export const bootstrap = async (exit?: (code: number) => void): Promise<void> => {
   const doExit = exit ?? ((code) => process.exit(code));
   try {
+    // Initialize required directories
+    try {
+      await initDirectories();
+      logger.info('Required directories initialized');
+    } catch (error) {
+      logger.error('Failed to initialize directories', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      doExit(1);
+      return;
+    }
+
     // Initialize SMS service
     createSmsService({
       accountSid: config.TWILIO_ACCOUNT_SID,
       authToken: config.TWILIO_AUTH_TOKEN,
       fromNumber: config.TWILIO_FROM_NUMBER,
     });
+
+    // Verify rate-limiter Redis store is reachable (#916)
+    await checkRateLimiterStore(doExit);
 
     // Initialize 2FA lockout store with Redis backend (#610)
     try {
@@ -229,10 +254,10 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       // Note: Do not exit on this error; continue with in-memory fallback
     }
 
-    // Initialize job queue workers
+    // Initialize job queue workers (email, payout, sync, notification, moderation)
+    // AI and social posting workers run in the separate socialflow-worker process
     logger.info('Initializing job queue workers...');
     initializeWorkers();
-    startWorkers();
 
     // Initialize health monitoring
     try {
@@ -284,6 +309,16 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       });
     }
 
+    // Start platform median refresh job (seeds PredictiveService from real analytics data)
+    try {
+      await startPlatformMedianJob();
+      logger.info('Platform median job started');
+    } catch (error) {
+      logger.error('Failed to start platform median job', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
     // Start TikTok video upload worker
     try {
       startTikTokVideoWorker();
@@ -312,6 +347,18 @@ export const bootstrap = async (exit?: (code: number) => void): Promise<void> =>
       logger.error('Failed to start Twitter webhook worker', {
         error: error instanceof Error ? error.message : String(error),
       });
+    }
+
+    // Verify database connectivity before accepting traffic
+    try {
+      await prisma.$queryRaw`SELECT 1`;
+      logger.info('Database connectivity verified');
+    } catch (error) {
+      logger.error('Database connectivity check failed — aborting startup', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      doExit(1);
+      return;
     }
 
     // Start HTTP server

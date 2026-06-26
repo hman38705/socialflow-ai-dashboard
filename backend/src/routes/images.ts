@@ -1,9 +1,14 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
+import fs from 'fs';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { ImageOptimizationService } from '../services/ImageOptimizationService';
 
 const router = Router();
+
+const UPLOAD_BASE = path.resolve(process.cwd(), 'uploads');
 
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -78,7 +83,8 @@ const upload = multer({
  *       400:
  *         description: No image provided
  */
-router.post('/upload', upload.single('image'), async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/upload', authMiddleware, checkPermission('posts:create'), upload.single('image'), async (req: Request, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image provided' });
@@ -161,13 +167,20 @@ router.get('/proxy', async (req: Request, res: Response) => {
       return res.status(400).json({ error: 'path parameter required' });
     }
 
-    // Security: prevent directory traversal
-    const normalizedPath = path.normalize(imagePath);
-    if (normalizedPath.includes('..')) {
+    // Security: prevent directory traversal via resolve + realpath
+    const requestedPath = path.resolve(UPLOAD_BASE, imagePath);
+    if (!requestedPath.startsWith(UPLOAD_BASE + path.sep)) {
       return res.status(400).json({ error: 'Invalid path' });
     }
-
-    const fullPath = path.join(process.cwd(), 'uploads', normalizedPath);
+    let fullPath: string;
+    try {
+      fullPath = fs.realpathSync(requestedPath);
+    } catch {
+      return res.status(404).json({ error: 'Not found' });
+    }
+    if (!fullPath.startsWith(UPLOAD_BASE + path.sep)) {
+      return res.status(400).json({ error: 'Invalid path' });
+    }
 
     const options = {
       width: width ? parseInt(width as string) : undefined,
@@ -223,7 +236,8 @@ router.get('/cache/size', async (req: Request, res: Response) => {
  *       200:
  *         description: Cache cleared
  */
-router.delete('/cache', async (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.delete('/cache', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   try {
     await ImageOptimizationService.clearCache();
     res.json({ message: 'Cache cleared' });

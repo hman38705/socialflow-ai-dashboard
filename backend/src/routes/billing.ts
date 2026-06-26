@@ -39,7 +39,7 @@ const portalSchema = z.object({
  *         description: Stripe error
  */
 router.post('/provision', authMiddleware, async (req: AuthRequest, res: Response) => {
-  const user = await UserStore.findById(req.userId!);
+  const user = await UserStore.findById(req.user!.id);
   if (!user) return res.status(404).json({ message: 'User not found' });
 
   try {
@@ -68,7 +68,7 @@ router.post('/provision', authMiddleware, async (req: AuthRequest, res: Response
  *         description: No subscription found
  */
 router.get('/subscription', authMiddleware, (req: AuthRequest, res: Response) => {
-  const sub = SubscriptionStore.findByUserId(req.userId!);
+  const sub = SubscriptionStore.findByUserId(req.user!.id);
   if (!sub)
     return res.status(404).json({ message: 'No subscription found. Call /provision first.' });
   return res.json(sub);
@@ -85,7 +85,7 @@ router.get('/subscription', authMiddleware, (req: AuthRequest, res: Response) =>
  *         description: Credit log entries
  */
 router.get('/credits', authMiddleware, (req: AuthRequest, res: Response) => {
-  const logs = CreditLogStore.forUser(req.userId!);
+  const logs = CreditLogStore.forUser(req.user!.id);
   return res.json(logs);
 });
 
@@ -131,7 +131,7 @@ router.post(
     const { priceId, successUrl, cancelUrl } = req.body;
     try {
       const url = await billingService.createCheckoutSession(
-        req.userId!,
+        req.user!.id,
         priceId,
         successUrl,
         cancelUrl,
@@ -180,7 +180,7 @@ router.post(
   async (req: AuthRequest, res: Response) => {
     const { returnUrl } = req.body;
     try {
-      const url = await billingService.createPortalSession(req.userId!, returnUrl);
+      const url = await billingService.createPortalSession(req.user!.id, returnUrl);
       return res.json({ url });
     } catch (err) {
       logger.error('Portal session failed', { error: (err as Error).message });

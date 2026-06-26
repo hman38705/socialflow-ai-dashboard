@@ -9,7 +9,6 @@ lerna-debug.log*
 
 # Dependencies
 node_modules/
-package-lock.json/
 
 # Build outputs
 dist
@@ -17,8 +16,11 @@ dist-ssr
 dist-electron
 out
 release
+*.tsbuildinfo
 
 # Environment files
+.env
+.env.*
 *.local
 .env.local
 .env.*.local
@@ -29,9 +31,11 @@ test-accounts.json
 # Coverage reports
 coverage
 .nyc_output
+*.lcov
 
 # Test results
 test-results
+junit.xml
 
 # Test snapshots
 **/__snapshots__/
@@ -47,14 +51,12 @@ test-results
 *.njsproj
 *.sln
 *.sw?
+Thumbs.db
 
 # Project Tracking
 tasks.md
 task.md
-# Test coverage
-coverage
-.nyc_output
-*.lcov
+vrickish.md
 
 # Prisma
 prisma/dev.db
@@ -63,3 +65,25 @@ prisma/dev.db-journal
 # Uploads
 uploads/
 backend/uploads/
+
+# Terraform state and local overrides
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+.terraform/
+.terraform.lock.hcl
+
+# Project Tracking
+somzilla.md
+
+# OS
+.DS_Store
+desktop.ini
+Thumbs.db
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak

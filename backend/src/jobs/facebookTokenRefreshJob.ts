@@ -6,6 +6,45 @@ import { facebookService } from '../services/FacebookService';
 
 const logger = createLogger('facebook-token-refresh-job');
 
+/**
+ * Facebook OAuth error code 190 subcodes indicating permanent token revocation.
+ * These are non-retryable: the user must reconnect the app.
+ *   458 — user removed app from their Facebook account
+ *   460 — password change invalidated token
+ *   463 — token has expired (non-recoverable)
+ *   467 — token has been invalidated (logout / session revoked)
+ */
+const REVOCATION_SUBCODES = new Set([458, 460, 463, 467]);
+
+function isFacebookRevocation(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  try {
+    // Errors from FacebookService are stringified: "...failed: <json>"
+    const jsonMatch = msg.match(/failed: (\{.+\})$/s);
+    if (jsonMatch) {
+      const parsed = JSON.parse(jsonMatch[1]);
+      const inner = parsed?.error ?? parsed;
+      const code    = Number(inner?.code    ?? inner?.error_code    ?? 0);
+      const subcode = Number(inner?.subcode ?? inner?.error_subcode ?? 0);
+      return code === 190 && REVOCATION_SUBCODES.has(subcode);
+    }
+  } catch {
+    // parse failure → not a revocation error
+  }
+  return false;
+}
+
+async function handleRevocation(key: string, redis: Redis): Promise<void> {
+  await redis.hset(key, {
+    status:           'disconnected',
+    disconnectedAt:   String(Date.now()),
+    disconnectReason: 'token_revoked',
+  });
+  // Remove the TTL so the disconnected state persists for auditing
+  await redis.persist(key);
+  logger.warn('Facebook token revoked — marked disconnected', { key });
+}
+
 const QUEUE_NAME = 'facebook-token-refresh';
 const JOB_NAME = 'refresh-facebook-tokens';
 const REPEAT_JOB_ID = 'facebook-token-refresh-repeat';
@@ -82,8 +121,13 @@ export const startFacebookTokenRefreshJob = async (): Promise<void> => {
             await redis.expireat(key, Math.ceil(result.expiresAt / 1000) + 86400);
             refreshed++;
             logger.info('Facebook token refreshed', { key });
-          } catch (err: any) {
-            logger.error('Failed to refresh Facebook token', { key, error: err.message });
+          } catch (err: unknown) {
+            if (isFacebookRevocation(err)) {
+              await handleRevocation(key, redis);
+              // Revocation is terminal — do not count as a retryable failure
+              continue;
+            }
+            logger.error('Failed to refresh Facebook token', { key, error: err instanceof Error ? err.message : String(err) });
             failed++;
           }
         }

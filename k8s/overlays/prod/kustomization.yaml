@@ -35,18 +35,6 @@ patches:
                   limits:
                     cpu: 1000m
                     memory: 1Gi
-  # Always pull the image in production to prevent stale cached images
-  - patch: |-
-      apiVersion: apps/v1
-      kind: Deployment
-      metadata:
-        name: socialflow-backend
-      spec:
-        template:
-          spec:
-            containers:
-              - name: backend
-                imagePullPolicy: Always
   # HPA: 3–20 replicas in prod
   - patch: |-
       apiVersion: autoscaling/v2

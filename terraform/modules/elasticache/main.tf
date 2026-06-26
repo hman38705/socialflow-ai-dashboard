@@ -34,5 +34,6 @@ resource "aws_elasticache_replication_group" "main" {
   security_group_ids   = [aws_security_group.redis.id]
   at_rest_encryption_enabled = true
   transit_encryption_enabled = true
-  tags                 = { Env = var.env }
+  automatic_failover_enabled = var.env == "prod" ? true : false
+  tags                       = { Env = var.env }
 }

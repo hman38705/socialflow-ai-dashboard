@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { facebookService, FacebookPostRequest } from '../services/FacebookService';
 import { createLogger } from '../lib/logger';
 
@@ -92,7 +94,8 @@ router.get('/pages', async (req: Request, res: Response) => {
  * Body: { pageId, message, imageUrl?, scheduledTime? }
  * Header: x-facebook-token (user access token)
  */
-router.post('/post', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/post', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   const accessToken = req.headers['x-facebook-token'] as string;
   const { pageId, message, imageUrl, scheduledTime } = req.body;
 
@@ -156,7 +159,8 @@ router.get('/post/:pageId/:postId/comments', async (req: Request, res: Response)
  * Body: { message }
  * Header: x-facebook-token
  */
-router.post('/comment/:commentId/reply', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/comment/:commentId/reply', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   const accessToken = req.headers['x-facebook-token'] as string;
   const { commentId } = req.params;
   const { message, pageId } = req.body;
@@ -184,7 +188,8 @@ router.post('/comment/:commentId/reply', async (req: Request, res: Response) => 
  * Header: x-facebook-token
  * Query: pageId, access_token
  */
-router.delete('/comment/:commentId', async (req: Request, res: Response) => {
+// Required permission: posts:delete
+router.delete('/comment/:commentId', authMiddleware, checkPermission('posts:delete'), async (req: Request, res: Response) => {
   const accessToken = req.query.access_token as string;
   const { commentId } = req.params;
 

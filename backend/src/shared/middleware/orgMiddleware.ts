@@ -19,7 +19,7 @@ export async function orgMiddleware(
   }
 
   const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgId, userId: req.userId! } },
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
   });
 
   if (!membership) {

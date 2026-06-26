@@ -1,7 +1,7 @@
 terraform {
   backend "s3" {
     bucket         = "socialflow-terraform-state"
-    key            = "dev/terraform.tfstate"
+    key            = "env/dev/terraform.tfstate"
     region         = "us-east-1"
     encrypt        = true
     dynamodb_table = "socialflow-terraform-locks"
@@ -69,4 +69,11 @@ module "elasticache" {
   subnet_ids = module.networking.private_subnet_ids
   node_type  = "cache.t3.micro"
   app_sg_id  = module.ecs.app_sg_id
+}
+
+module "iam" {
+  source             = "../../modules/iam"
+  env                = "dev"
+  aws_region         = var.aws_region
+  trusted_principals = var.terraform_trusted_principals
 }

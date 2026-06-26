@@ -21,14 +21,14 @@ export async function createOrganization(req: AuthRequest, res: Response): Promi
       name,
       slug,
       members: {
-        create: { id: randomUUID(), userId: req.userId!, role: 'owner' },
+        create: { id: randomUUID(), userId: req.user!.id, role: 'owner' },
       },
     },
     include: { members: true },
   });
 
   // Invalidate the caller's org list cache
-  await invalidateCachePattern(`org-list:${req.userId!}:*`);
+  await invalidateCachePattern(`org-list:${req.user!.id}:*`);
 
   res.status(201).json(org);
 }
@@ -36,7 +36,7 @@ export async function createOrganization(req: AuthRequest, res: Response): Promi
 /** GET /api/organizations — list orgs the caller belongs to */
 export async function listOrganizations(req: AuthRequest, res: Response): Promise<void> {
   const params = parsePageLimit(req);
-  const userId = req.userId!;
+  const userId = req.user!.id;
   const cacheKey = `org-list:${userId}:${params.page}:${params.limit}`;
 
   const result = await withCache(cacheKey, CacheTTL.ORG_LIST, async () => {
@@ -63,9 +63,9 @@ export async function listOrganizations(req: AuthRequest, res: Response): Promis
 export async function getOrganization(req: AuthRequest, res: Response): Promise<void> {
   const { orgId } = req.params;
 
-  const membership = await withCache(`org:${orgId}:${req.userId}`, CacheTTL.ORG, () =>
+  const membership = await withCache(`org:${orgId}:${req.user!.id}`, CacheTTL.ORG, () =>
     prisma.organizationMember.findUnique({
-      where: { organizationId_userId: { organizationId: orgId, userId: req.userId! } },
+      where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
       include: {
         organization: {
           include: { members: { include: { user: { select: { id: true, email: true } } } } },
@@ -89,7 +89,7 @@ export async function addMember(req: AuthRequest, res: Response): Promise<void> 
 
   // Only owner/admin can invite
   const callerMembership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgId, userId: req.userId! } },
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
   });
   if (!callerMembership || !['owner', 'admin'].includes(callerMembership.role)) {
     res.status(403).json({ message: 'Insufficient permissions' });
@@ -114,7 +114,7 @@ export async function removeMember(req: AuthRequest, res: Response): Promise<voi
   const { orgId, userId } = req.params;
 
   const callerMembership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgId, userId: req.userId! } },
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
   });
   if (!callerMembership || !['owner', 'admin'].includes(callerMembership.role)) {
     res.status(403).json({ message: 'Insufficient permissions' });
@@ -139,7 +139,7 @@ export async function switchOrganization(req: AuthRequest, res: Response): Promi
   const { orgId } = req.body as { orgId: string };
 
   const membership = await prisma.organizationMember.findUnique({
-    where: { organizationId_userId: { organizationId: orgId, userId: req.userId! } },
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
     include: { organization: true },
   });
 

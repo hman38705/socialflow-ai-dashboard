@@ -1,4 +1,7 @@
 import { GoogleGenAI } from '@google/genai';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('hashtag-generator');
 
 type SupportedPlatform =
   | 'instagram'
@@ -35,7 +38,7 @@ export interface HashtagGenerationResult {
   };
 }
 
-const apiKey = process.env.API_KEY ?? '';
+const apiKey = process.env.GEMINI_API_KEY ?? '';
 const aiClient = apiKey ? new GoogleGenAI({ apiKey }) : null;
 
 const STOP_WORDS = new Set([
@@ -269,7 +272,7 @@ const generateAiHashtags = async (
   heuristic: HashtagGenerationResult,
 ): Promise<string[]> => {
   if (!aiClient) {
-    throw new Error('API_KEY is not configured for AI hashtag generation.');
+    throw new Error('GEMINI_API_KEY is not configured for AI hashtag generation.');
   }
 
   const trendHints =

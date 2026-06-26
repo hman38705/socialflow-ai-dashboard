@@ -1,6 +1,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { createLogger } from '../lib/logger';
+import { videoConfig } from '../config/video.config';
 
 const logger = createLogger('initDirectories');
 
@@ -9,8 +10,8 @@ const logger = createLogger('initDirectories');
  */
 export async function initDirectories(): Promise<void> {
   const directories = [
-    path.join(process.cwd(), 'uploads', 'videos'),
-    path.join(process.cwd(), 'uploads', 'transcoded'),
+    path.join(process.cwd(), videoConfig.upload.uploadDir),
+    path.join(process.cwd(), videoConfig.upload.transcodedDir),
     path.join(process.cwd(), 'uploads', 'tts'),
   ];
 
@@ -20,6 +21,7 @@ export async function initDirectories(): Promise<void> {
       logger.info(`Directory ensured: ${dir}`);
     } catch (error) {
       logger.error(`Failed to create directory ${dir}`, { error });
+      throw error;
     }
   }
 }

@@ -36,18 +36,31 @@ export const softDeleteMiddleware = async (params: MiddlewareParams, next: Next)
   }
 
   if (params.action === 'deleteMany') {
+    // Capture IDs before the action is rewritten to updateMany
+    let idsToRemove: string[] = [];
+    if (params.model === 'Post' && params.args.where) {
+      const { prisma: prismaClient } = await import('../lib/prisma');
+      const posts = await prismaClient.post.findMany({
+        where: params.args.where,
+        select: { id: true },
+      });
+      idsToRemove = posts.map((p: { id: string }) => p.id);
+    }
+
     params.action = 'updateMany';
     params.args.data = { deletedAt: new Date() };
     const result = await next(params);
-    
-    // Remove from search index if deleting Posts
-    if (params.model === 'Post' && params.args.where) {
-      const { deletePost } = await import('../services/SearchService');
-      // For deleteMany, we don't have the IDs upfront, so we'd need to query first
-      // For now, log a warning that bulk deletes won't update the index
-      console.warn('Bulk Post deletion detected; search index may be out of sync');
+
+    if (idsToRemove.length > 0) {
+      const { getMeiliClient } = await import('../lib/meilisearch');
+      getMeiliClient()
+        .index('posts')
+        .deleteDocuments(idsToRemove)
+        .catch((err: Error) => {
+          console.error('Failed to remove posts from search index', { count: idsToRemove.length, error: err });
+        });
     }
-    
+
     return result;
   }
 

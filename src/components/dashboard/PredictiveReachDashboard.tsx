@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { predictiveService } from '../../services/PredictiveService';
 import { PostAnalysisInput, ReachPrediction, MLModelMetrics } from '../../types/predictive';
@@ -129,7 +129,10 @@ export const PredictiveReachDashboard: React.FC = () => {
     }
   };
 
-  const totalEngagement = analytics.reduce((acc, curr) => acc + curr.likes + curr.comments, 0);
+  const totalEngagement = useMemo(
+    () => analytics.reduce((acc, curr) => acc + curr.likes + curr.comments, 0),
+    [analytics]
+  );
 
   if (!loading && analytics.length === 0 && predictions.length === 0) {
     return (

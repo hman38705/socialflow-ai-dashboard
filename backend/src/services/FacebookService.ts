@@ -53,10 +53,13 @@ export interface FacebookComment {
   created_time: string;
 }
 
-const API_BASE = 'https://graph.facebook.com/v18.0';
+const FB_API_VERSION = process.env.FACEBOOK_API_VERSION ?? 'v18.0';
+const API_BASE = `https://graph.facebook.com/${FB_API_VERSION}`;
 // OAUTH_TOKEN_URL reserved for future token exchange implementation
-const _OAUTH_TOKEN_URL = 'https://graph.facebook.com/v18.0/oauth/access_token';
-const FACEBOOK_AUTH_URL = 'https://www.facebook.com/v18.0/dialog/oauth';
+const _OAUTH_TOKEN_URL = `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token`;
+const FACEBOOK_AUTH_URL = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth`;
+
+logger.info(`FacebookService using Graph API version ${FB_API_VERSION}`);
 
 class FacebookService {
   private readonly appId: string;

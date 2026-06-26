@@ -1,3 +1,4 @@
+import { createHash } from 'crypto';
 import { queueManager } from './queueManager';
 
 // Queue names
@@ -38,14 +39,10 @@ export const emailQueue = queueManager.createQueue(EMAIL_QUEUE_NAME, {
   removeOnFail: 500,
 });
 
-/**
- * Build a deterministic job ID to deduplicate transactional emails.
- * Same recipient + template on the same UTC date will produce the same ID,
- * so a second enqueue is a no-op in BullMQ.
- */
+// 5-minute deduplication window: same recipient + template within the same bucket maps to the same job ID
 function transactionalJobId(to: string, templateId: string): string {
-  const date = new Date().toISOString().slice(0, 10); // YYYY-MM-DD
-  return `${to}:${templateId}:${date}`;
+  const bucket = Math.floor(Date.now() / (5 * 60 * 1000));
+  return createHash('sha256').update(`${to}:${templateId}:${bucket}`).digest('hex');
 }
 
 /**

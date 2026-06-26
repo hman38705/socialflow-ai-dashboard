@@ -6,7 +6,11 @@ import { getRedisConnection } from '../config/runtime';
 const logger = createLogger('tiktok-service');
 
 const UPLOAD_PROGRESS_PREFIX = 'tiktok:upload:progress:';
+const UPLOAD_SESSION_PREFIX = 'tiktok:upload:session:';
 const UPLOAD_PROGRESS_TTL = 86400; // 24 hours
+
+// Field name inside the progress hash that tracks the last confirmed chunk index
+const LAST_CHUNK_FIELD = '__lastChunk';
 
 let _redis: Redis | null = null;
 function getRedis(): Redis {
@@ -309,28 +313,100 @@ class TikTokService {
     const startByte = chunkIndex * CHUNK_SIZE_BYTES;
     const endByte = Math.min(startByte + chunkData.length - 1, totalFileSize - 1);
 
-    const response = await fetch(uploadUrl, {
-      method: 'PUT',
-      headers: {
-        'Content-Type': 'video/mp4',
-        'Content-Range': `bytes ${startByte}-${endByte}/${totalFileSize}`,
-        'Content-Length': String(chunkData.length),
-      },
-      body: chunkData,
-    });
+    try {
+      const response = await fetch(uploadUrl, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'video/mp4',
+          'Content-Range': `bytes ${startByte}-${endByte}/${totalFileSize}`,
+          'Content-Length': String(chunkData.length),
+        },
+        body: chunkData,
+      });
 
-    if (!response.ok && response.status !== 206) {
-      const text = await response.text();
-      throw new Error(
-        `Chunk ${chunkIndex + 1}/${totalChunks} upload failed (${response.status}): ${text}`,
-      );
+      if (!response.ok && response.status !== 206) {
+        const text = await response.text();
+        throw new Error(
+          `Chunk ${chunkIndex + 1}/${totalChunks} upload failed (${response.status}): ${text}`,
+        );
+      }
+
+      // Mark chunk as confirmed, update last successful chunk index, and refresh TTL
+      await redis.hset(progressKey, String(chunkIndex), '1');
+      await redis.hset(progressKey, LAST_CHUNK_FIELD, String(chunkIndex));
+      await redis.expire(progressKey, UPLOAD_PROGRESS_TTL);
+
+      logger.info('TikTok chunk uploaded', { chunkIndex: chunkIndex + 1, totalChunks });
+    } catch (error) {
+      // Clean up progress key on failure
+      await redis.del(progressKey);
+      logger.error('TikTok chunk upload failed, progress cleaned up', {
+        chunkIndex: chunkIndex + 1,
+        totalChunks,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
     }
+  }
 
-    // Mark chunk as confirmed and refresh TTL
-    await redis.hset(progressKey, String(chunkIndex), '1');
-    await redis.expire(progressKey, UPLOAD_PROGRESS_TTL);
+  /**
+   * Retrieve the last successfully uploaded chunk index for a session.
+   * Returns -1 when no chunks have been confirmed yet.
+   */
+  public async getLastUploadedChunk(uploadSessionId: string): Promise<number> {
+    const redis = getRedis();
+    const progressKey = `${UPLOAD_PROGRESS_PREFIX}${uploadSessionId}`;
+    const value = await redis.hget(progressKey, LAST_CHUNK_FIELD);
+    return value !== null ? Number(value) : -1;
+  }
 
-    logger.info('TikTok chunk uploaded', { chunkIndex: chunkIndex + 1, totalChunks });
+  /**
+   * Persist upload session metadata (publishId, uploadUrl, chunk dimensions)
+   * under a stable caller-supplied key so that a retried job can resume the
+   * same TikTok upload session instead of initiating a new one.
+   */
+  public async storeUploadSession(
+    sessionKey: string,
+    data: { publishId: string; uploadUrl: string; chunkSize: number; totalChunks: number },
+  ): Promise<void> {
+    const redis = getRedis();
+    const key = `${UPLOAD_SESSION_PREFIX}${sessionKey}`;
+    await redis.hmset(key, {
+      publishId: data.publishId,
+      uploadUrl: data.uploadUrl,
+      chunkSize: String(data.chunkSize),
+      totalChunks: String(data.totalChunks),
+    });
+    await redis.expire(key, UPLOAD_PROGRESS_TTL);
+  }
+
+  /**
+   * Retrieve a previously stored upload session.
+   * Returns null when no session exists for the given key.
+   */
+  public async getUploadSession(sessionKey: string): Promise<{
+    publishId: string;
+    uploadUrl: string;
+    chunkSize: number;
+    totalChunks: number;
+  } | null> {
+    const redis = getRedis();
+    const key = `${UPLOAD_SESSION_PREFIX}${sessionKey}`;
+    const data = await redis.hgetall(key);
+    if (!data || !data.publishId) return null;
+    return {
+      publishId: data.publishId,
+      uploadUrl: data.uploadUrl,
+      chunkSize: Number(data.chunkSize),
+      totalChunks: Number(data.totalChunks),
+    };
+  }
+
+  /**
+   * Clear upload session metadata for a completed or abandoned upload.
+   */
+  public async clearUploadSession(sessionKey: string): Promise<void> {
+    await getRedis().del(`${UPLOAD_SESSION_PREFIX}${sessionKey}`);
   }
 
   /**

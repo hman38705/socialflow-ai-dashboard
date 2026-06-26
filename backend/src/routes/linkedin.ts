@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { linkedInService, LinkedInShareRequest } from '../services/LinkedInService';
 import { createLogger } from '../lib/logger';
 
@@ -86,7 +88,8 @@ router.get('/profile', async (req: Request, res: Response) => {
  * `mediaAssets` is an array of up to 20 objects: { url, title?, description? }
  * When provided it creates a multi-image post and takes precedence over `url`.
  */
-router.post('/share', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/share', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   const accessToken = req.headers['x-linkedin-token'] as string;
   if (!accessToken) {
     return res.status(400).json({ error: 'x-linkedin-token header required.' });

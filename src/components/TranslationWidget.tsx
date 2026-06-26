@@ -1,22 +1,30 @@
-import React, { useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { translationService } from '../services/TranslationService';
 import { TranslationResult, SupportedLanguage } from '@socialflow/shared';
 
 interface TranslationWidgetProps {
   text: string;
   onTranslationComplete?: (result: TranslationResult) => void;
+  debounceMs?: number;
 }
+
+const DEFAULT_DEBOUNCE_MS = 500;
 
 const MaterialIcon = ({ name, className }: { name: string; className?: string }) => (
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
 );
 
-export const TranslationWidget: React.FC<TranslationWidgetProps> = ({ text, onTranslationComplete }) => {
+export const TranslationWidget: React.FC<TranslationWidgetProps> = ({
+  text,
+  onTranslationComplete,
+  debounceMs = DEFAULT_DEBOUNCE_MS,
+}) => {
   const [selectedLanguages, setSelectedLanguages] = useState<string[]>([]);
   const [translationResult, setTranslationResult] = useState<TranslationResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [showLanguageSelector, setShowLanguageSelector] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const languages = translationService.getSupportedLanguages();
   const filteredLanguages = searchQuery
@@ -25,7 +33,7 @@ export const TranslationWidget: React.FC<TranslationWidgetProps> = ({ text, onTr
 
   const popularLanguages = ['es', 'fr', 'de', 'pt', 'ja', 'zh'];
 
-  const handleTranslate = async () => {
+  const runTranslation = useCallback(async () => {
     if (!text || selectedLanguages.length === 0) return;
 
     setLoading(true);
@@ -46,7 +54,20 @@ export const TranslationWidget: React.FC<TranslationWidgetProps> = ({ text, onTr
     } finally {
       setLoading(false);
     }
+  }, [onTranslationComplete, selectedLanguages, text]);
+
+  const handleTranslate = () => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      void runTranslation();
+    }, debounceMs);
   };
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, []);
 
   const toggleLanguage = (langCode: string) => {
     setSelectedLanguages(prev =>

@@ -57,7 +57,17 @@ function buildExporter(): SpanExporter {
 
 // ─── SDK initialisation ──────────────────────────────────────────────────────
 
-const isDebug = config.OTEL_DEBUG;
+// #903: Prevent OTEL_DEBUG=true in production — it enables per-span I/O latency logging and degrades performance.
+let isDebug = config.OTEL_DEBUG;
+if (config.NODE_ENV === 'production' && isDebug) {
+  logger.error(
+    'CRITICAL: OTEL_DEBUG=true is set in a production environment. ' +
+    'This enables verbose per-span logging and degrades performance. ' +
+    'Disabling OTEL_DEBUG. Remove OTEL_DEBUG=true from your production configuration.'
+  );
+  isDebug = false;
+}
+
 const serviceName = config.OTEL_SERVICE_NAME;
 
 const exporter = buildExporter();

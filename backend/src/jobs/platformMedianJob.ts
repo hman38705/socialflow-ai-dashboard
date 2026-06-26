@@ -2,6 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { getRedisConnection } from '../config/runtime';
 import { createLogger } from '../lib/logger';
 import { prisma } from '../lib/prisma';
+import { withCache, invalidateCache } from '../utils/cache';
 import { predictiveService } from '../services/PredictiveService';
 import { PlatformMedians } from '../types/predictive';
 
@@ -12,6 +13,8 @@ const JOB_NAME = 'compute-platform-medians';
 const REPEAT_JOB_ID = 'platform-median-repeat';
 /** Refresh every 6 hours */
 const CRON = '0 */6 * * *';
+export const PLATFORM_MEDIANS_CACHE_KEY = 'platform-medians';
+const CACHE_TTL_SECONDS = 3600; // 1 hour
 
 let queue: Queue | null = null;
 let worker: Worker | null = null;
@@ -47,7 +50,26 @@ export async function computePlatformMedians(): Promise<PlatformMedians> {
   return result;
 }
 
+/** Compute medians and cache in Redis for 1 hour. */
+export async function computeAndCachePlatformMedians(): Promise<PlatformMedians> {
+  return withCache(PLATFORM_MEDIANS_CACHE_KEY, CACHE_TTL_SECONDS, computePlatformMedians);
+}
+
 export const startPlatformMedianJob = async (): Promise<void> => {
+  // Seed immediately from cache (or DB on cache miss) so the first request
+  // uses real data rather than hardcoded defaults.
+  try {
+    const medians = await computeAndCachePlatformMedians();
+    if (Object.keys(medians).length > 0) {
+      predictiveService.seedFromMedians(medians);
+      logger.info('Platform medians seeded on startup', { platforms: Object.keys(medians) });
+    }
+  } catch (err) {
+    logger.warn('Could not seed platform medians on startup, using defaults', {
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   if (!queue) {
     queue = new Queue(QUEUE_NAME, { connection: getRedisConnection() });
   }
@@ -57,6 +79,9 @@ export const startPlatformMedianJob = async (): Promise<void> => {
       QUEUE_NAME,
       async () => {
         const medians = await computePlatformMedians();
+        // Bust the cache so the next read picks up fresh values
+        await invalidateCache(PLATFORM_MEDIANS_CACHE_KEY);
+        await computeAndCachePlatformMedians();
         predictiveService.seedFromMedians(medians);
         logger.info('Platform medians refreshed', { platforms: Object.keys(medians) });
         return medians;

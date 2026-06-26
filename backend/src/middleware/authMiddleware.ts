@@ -4,7 +4,7 @@ import { AuthBlacklistService } from '../services/AuthBlacklistService';
 import { config } from '../config/config';
 
 export interface AuthRequest extends Request {
-  userId?: string;
+  user?: { id: string };
   activeOrgId?: string;
 }
 
@@ -34,6 +34,6 @@ export async function authMiddleware(
     return;
   }
 
-  req.userId = payload.sub as string;
+  req.user = { id: payload.sub as string };
   next();
 }

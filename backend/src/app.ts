@@ -15,6 +15,7 @@ import metricsRouter from './routes/metrics';
 import { swaggerSpec } from './config/swagger';
 import { createApolloServer } from './graphql';
 import { buildContext } from './graphql/context';
+import { authenticate } from './middleware/authenticate';
 
 // Initialise rate limiters (resolves Redis store in production)
 export const rateLimitersReady = initRateLimiters();
@@ -23,11 +24,30 @@ const app: Application = express();
 
 // ── Core middleware ───────────────────────────────────────────────────────────
 
+// Security headers — applied globally before any route
+app.use(helmet());
+
 // Response compression (Gzip/Brotli) — before body parsing so all responses are eligible
 app.use(compressionMiddleware);
 
-// CORS — allow EventSource connections
-app.use(cors());
+// CORS — restrict to known frontend origins
+const ALLOWED_ORIGINS = (process.env.CORS_ALLOWED_ORIGINS ?? '')
+  .split(',')
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+app.use(
+  cors({
+    origin: (origin, callback) => {
+      if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error(`CORS: origin ${origin} not allowed`));
+      }
+    },
+    credentials: true,
+  }),
+);
 app.use(requestIdMiddleware);
 app.use(sliMiddleware);
 app.use(express.json());
@@ -60,7 +80,15 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Bare /health for load-balancer probes (no versioning needed)
 app.get('/health', (_req: Request, res: Response) => {
-  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  const { config } = require('./config/config');
+  const ttsAvailable = !!(config.ELEVENLABS_API_KEY || config.GOOGLE_TTS_API_KEY);
+  res.status(200).json({
+    status: 'ok',
+    timestamp: new Date().toISOString(),
+    features: {
+      tts: ttsAvailable ? 'available' : 'unavailable',
+    },
+  });
 });
 
 // Prometheus metrics scrape endpoint
@@ -74,8 +102,18 @@ const apolloServer = createApolloServer();
 export const apolloReady = apolloServer.start().then(() => {
   app.use(
     '/graphql',
-    cors<cors.CorsRequest>(),
+    cors<cors.CorsRequest>({
+      origin: (origin, callback) => {
+        if (!origin || ALLOWED_ORIGINS.includes(origin)) {
+          callback(null, true);
+        } else {
+          callback(new Error(`CORS: origin ${origin} not allowed`));
+        }
+      },
+      credentials: true,
+    }),
     express.json(),
+    authenticate,
     expressMiddleware(apolloServer, { context: buildContext }),
   );
 });

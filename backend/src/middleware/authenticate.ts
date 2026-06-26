@@ -5,8 +5,6 @@ import { config } from '../config/config';
 
 export interface AuthRequest extends Request {
   user?: { id: string };
-  /** @deprecated Use req.user.id instead */
-  userId?: string;
   activeOrgId?: string;
 }
 
@@ -47,7 +45,5 @@ export async function authenticate(
 
   const userId = payload.sub as string;
   req.user = { id: userId };
-  // Keep req.userId for backward-compat with downstream middleware (checkPermission, requireCredits, etc.)
-  req.userId = userId;
   next();
 }

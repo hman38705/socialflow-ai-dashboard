@@ -121,31 +121,35 @@ async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
   let completedTasks = 0;
   const outputs: TranscodedOutput[] = [];
 
-  for (const quality of qualities) {
-    for (const format of formats) {
-      const outputPath = path.join(outputDir, `video_${quality.name}.${format.extension}`);
-      try {
-        const output = await transcodeVideo(job, quality, format);
-        outputs.push(output);
-        completedTasks++;
-        const progress = Math.round((completedTasks / totalTasks) * 100);
-        await bullJob.updateProgress(progress);
-        if (userId) {
-          eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'processing', progress, message: `Transcoding ${progress}%` });
+  try {
+    for (const quality of qualities) {
+      for (const format of formats) {
+        const outputPath = path.join(outputDir, `video_${quality.name}.${format.extension}`);
+        try {
+          const output = await transcodeVideo(job, quality, format);
+          outputs.push(output);
+          completedTasks++;
+          const progress = Math.round((completedTasks / totalTasks) * 100);
+          await bullJob.updateProgress(progress);
+          if (userId) {
+            eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'processing', progress, message: `Transcoding ${progress}%` });
+          }
+        } catch (error) {
+          await fs.rm(outputPath, { force: true }).catch(() => {});
+          logger.error(`Failed to transcode ${quality.name} ${format.extension}:`, { error });
         }
-      } catch (error) {
-        await fs.rm(outputPath, { force: true }).catch(() => {});
-        logger.error(`Failed to transcode ${quality.name} ${format.extension}:`, { error });
       }
     }
-  }
 
-  if (outputs.length === 0) {
-    throw new Error('All transcoding attempts failed');
-  }
+    if (outputs.length === 0) {
+      throw new Error('All transcoding attempts failed');
+    }
 
-  if (userId) {
-    eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'completed', progress: 100, message: 'Job completed' });
+    if (userId) {
+      eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'completed', progress: 100, message: 'Job completed' });
+    }
+  } finally {
+    await fs.unlink(inputPath).catch(() => {});
   }
 }
 

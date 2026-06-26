@@ -53,34 +53,33 @@ export async function deletePost(postId: string): Promise<void> {
   }
 }
 
-/** Full-text search across posts with optional filters. */
+/** Full-text search across posts. organizationId is required to scope results to one org. */
 export async function searchPosts(
   query: string,
   opts: {
-    organizationId?: string;
+    organizationId: string;
     platform?: string;
     limit?: number;
     offset?: number;
-  } = {},
+  },
 ) {
   const VALID_PLATFORMS = new Set(['twitter', 'instagram', 'facebook', 'linkedin', 'tiktok', 'youtube']);
   const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+  if (!UUID_RE.test(opts.organizationId)) {
+    throw new Error('Invalid organizationId');
+  }
   if (opts.platform && !VALID_PLATFORMS.has(opts.platform)) {
     throw new Error('Invalid platform value');
   }
-  if (opts.organizationId && !UUID_RE.test(opts.organizationId)) {
-    throw new Error('Invalid organizationId');
-  }
 
-  const filter: string[] = [];
-  if (opts.organizationId) filter.push(`organizationId = "${opts.organizationId}"`);
+  const filter: string[] = [`organizationId = "${opts.organizationId}"`];
   if (opts.platform) filter.push(`platform = "${opts.platform}"`);
 
   return getMeiliClient()
     .index(POSTS_INDEX)
     .search(query, {
-      filter: filter.length ? filter : undefined,
+      filter,
       limit: opts.limit ?? 20,
       offset: opts.offset ?? 0,
     });

@@ -18,15 +18,47 @@ spec:
         prometheus.io/path: "/metrics"
     spec:
       serviceAccountName: socialflow-backend
-      terminationGracePeriodSeconds: 60
+      terminationGracePeriodSeconds: 300
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+            - weight: 100
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: socialflow-backend
+                topologyKey: kubernetes.io/hostname
+            - weight: 50
+              podAffinityTerm:
+                labelSelector:
+                  matchLabels:
+                    app: socialflow-backend
+                topologyKey: topology.kubernetes.io/zone
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
         fsGroup: 1000
+      initContainers:
+        - name: migrate
+          image: socialflow-backend:latest
+          imagePullPolicy: Always
+          command: ["npx", "prisma", "migrate", "deploy"]
+          envFrom:
+            - configMapRef:
+                name: socialflow-config
+            - secretRef:
+                name: socialflow-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 250m
+              memory: 256Mi
       containers:
         - name: backend
           image: socialflow-backend:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
             - name: http
               containerPort: 3001
@@ -41,21 +73,24 @@ spec:
                 command: ["sleep", "5"]
           startupProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
             failureThreshold: 30
             periodSeconds: 5
           readinessProbe:
             httpGet:
-              path: /health
+              path: /health/ready
               port: http
+              httpHeaders:
+                - name: Authorization
+                  value: Bearer ${HEALTH_CHECK_TOKEN}
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3
             timeoutSeconds: 5
           livenessProbe:
             httpGet:
-              path: /health
+              path: /health/live
               port: http
             initialDelaySeconds: 0
             periodSeconds: 20

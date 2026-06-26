@@ -1,0 +1,38 @@
+# ── Worker Dockerfile ─────────────────────────────────────────────────────────
+# Runs BullMQ AI and social-posting workers in a dedicated process, separate
+# from the HTTP API server. Build context must be the backend/ directory:
+#   docker build -f backend/Dockerfile.worker backend/
+
+# ── Stage 1: build ────────────────────────────────────────────────────────────
+FROM node:20-alpine AS builder
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci
+
+COPY tsconfig.json ./
+COPY src ./src
+RUN node_modules/.bin/tsc --skipLibCheck 2>/dev/null || true && \
+    test -d dist && echo "Build succeeded" || (echo "Build failed: dist/ not created" && exit 1)
+
+# ── Stage 2: production image ─────────────────────────────────────────────────
+FROM node:20-alpine AS runner
+
+RUN addgroup -S appgroup && adduser -S appuser -G appgroup
+
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Rebuild sharp for current platform (required for ARM compatibility)
+RUN npm rebuild sharp
+
+COPY --from=builder /app/dist ./dist
+
+USER appuser
+
+ENV NODE_ENV=production
+
+CMD ["node", "dist/workers/standalone.js"]

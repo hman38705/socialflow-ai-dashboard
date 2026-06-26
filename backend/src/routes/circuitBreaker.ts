@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { circuitBreakerService } from '../services/CircuitBreakerService';
 import { aiService } from '../services/AIService';
 import { twitterService } from '../services/TwitterService';
@@ -77,7 +79,8 @@ router.get('/status/:service', (req: Request, res: Response) => {
  *       200:
  *         description: All circuit breakers reset
  */
-router.post('/reset', (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/reset', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
   try {
     circuitBreakerService.resetAll();
     res.json({
@@ -109,7 +112,8 @@ router.post('/reset', (req: Request, res: Response) => {
  *       200:
  *         description: Circuit breaker opened
  */
-router.post('/:service/open', (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/:service/open', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     circuitBreakerService.open(service as any);
@@ -142,7 +146,8 @@ router.post('/:service/open', (req: Request, res: Response) => {
  *       200:
  *         description: Circuit breaker closed
  */
-router.post('/:service/close', (req: Request, res: Response) => {
+// Required permission: settings:manage
+router.post('/:service/close', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     circuitBreakerService.close(service as any);

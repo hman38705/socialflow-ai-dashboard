@@ -4,6 +4,7 @@ import { moderate } from '../services/ModerationService';
 import { MODERATION_QUEUE_NAME, enqueueToDLQ } from '../queues/moderationQueue';
 import { getSmsService } from '../services/smsService';
 import { logger } from '../lib/logger';
+import { circuitBreakerService } from '../services/CircuitBreakerService';
 
 // Email job processor
 async function processEmailJob(job: any) {
@@ -203,31 +204,41 @@ async function processNotificationJob(job: any) {
 
   console.log(`Processing notification job ${job.id}: ${type} notification to ${recipient}`);
 
-  // Route to appropriate notification service based on type
-  switch (type) {
-    case 'push':
-      // await pushService.send(recipient, { title, body: message, data });
-      break;
-    case 'sms':
-      await getSmsService().send(recipient, _message);
-      break;
-    case 'in_app':
-      // await inAppService.create(recipient, { title, message, data });
-      break;
-    case 'webhook':
-      // await webhookService.send(recipient, { title, message, ...data });
-      break;
-    case 'slack':
-      // await slackService.send(recipient, message);
-      break;
-    case 'discord':
-      // await discordService.send(recipient, message);
-      break;
-    default:
-      console.warn(`Unknown notification type: ${type}`);
-  }
+  // Ensure the notification circuit breaker is registered
+  circuitBreakerService.getBreaker('notification');
 
-  await new Promise((resolve) => setTimeout(resolve, 100));
+  // Wrap the entire provider call with the circuit breaker so a sustained
+  // outage opens the circuit and stops retrying, preventing queue backlog.
+  await circuitBreakerService.execute(
+    'notification',
+    async () => {
+      // Route to appropriate notification service based on type
+      switch (type) {
+        case 'push':
+          // await pushService.send(recipient, { title, body: message, data });
+          break;
+        case 'sms':
+          await getSmsService().send(recipient, _message);
+          break;
+        case 'in_app':
+          // await inAppService.create(recipient, { title, message, data });
+          break;
+        case 'webhook':
+          // await webhookService.send(recipient, { title, message, ...data });
+          break;
+        case 'slack':
+          // await slackService.send(recipient, message);
+          break;
+        case 'discord':
+          // await discordService.send(recipient, message);
+          break;
+        default:
+          console.warn(`Unknown notification type: ${type}`);
+      }
+
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    },
+  );
 
   console.log(`Notification job ${job.id} completed`);
 

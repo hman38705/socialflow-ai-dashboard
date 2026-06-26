@@ -1,6 +1,9 @@
 import rateLimit, { Options, RateLimitRequestHandler } from 'express-rate-limit';
 import { Request, Response } from 'express';
 import { getRedisConnection } from '../config/runtime';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('rate-limit');
 
 // ---------------------------------------------------------------------------
 // Optional Redis store — only loaded in production to keep dev simple
@@ -16,9 +19,16 @@ async function buildStore() {
     const { default: Redis } = await import('ioredis');
     const client = new Redis(getRedisConnection());
     return new RedisStore({ sendCommand: (...args: string[]) => (client as any).call(...args) });
-  } catch {
-    // If rate-limit-redis isn't installed or Redis is unreachable, fall back to memory store.
-    // The default MemoryStore is used; capture it after limiter creation via the store option.
+  } catch (err) {
+    // In production, a missing Redis store is a fatal misconfiguration —
+    // falling back to in-memory would multiply the effective rate limit by
+    // the replica count, undermining security guarantees.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error(
+        `[rateLimit] Redis store unavailable in production: ${err instanceof Error ? err.message : String(err)}`,
+      );
+    }
+    // In development/test, fall back to the default in-memory MemoryStore.
     return undefined;
   }
 }
@@ -26,8 +36,17 @@ async function buildStore() {
 // ---------------------------------------------------------------------------
 // Shared handler — returns a consistent 429 JSON body
 // ---------------------------------------------------------------------------
-const handler = (_req: Request, res: Response): void => {
+const handler = (req: Request, res: Response): void => {
   const retryAfter = Math.ceil(Number(res.getHeader('Retry-After') ?? 60));
+
+  logger.warn('rate_limit_exceeded', {
+    ip:        req.ip ?? (req.socket as { remoteAddress?: string })?.remoteAddress ?? 'unknown',
+    path:      req.path,
+    method:    req.method,
+    userAgent: req.headers['user-agent'] ?? '',
+    userId:    (req as Request & { user?: { id?: string } }).user?.id ?? null,
+    retryAfter,
+  });
 
   res.status(429).json({
     success: false,
@@ -74,6 +93,31 @@ async function createLimiter(overrides: Partial<Options>): Promise<RateLimitRequ
 export let authLimiter: RateLimitRequestHandler;
 export let aiLimiter: RateLimitRequestHandler;
 export let generalLimiter: RateLimitRequestHandler;
+
+/**
+ * Verify the rate-limiter Redis store is reachable at startup.
+ *
+ * In production, a missing or unreachable Redis store means rate limits are
+ * not shared across instances — a silent misconfiguration that can allow
+ * credential-stuffing attacks. We therefore treat it as fatal in production
+ * and log a warning (falling back to the in-memory store) in other envs.
+ */
+export async function checkRateLimiterStore(
+  exit: (code: number) => void = (code) => process.exit(code),
+): Promise<void> {
+  const store = await getStore();
+  if (!store) {
+    const msg =
+      'Rate limiter Redis store is unavailable — falling back to in-memory store. ' +
+      'Rate limits will NOT be shared across instances.';
+    if (process.env.NODE_ENV === 'production') {
+      console.error(`[rateLimit] FATAL: ${msg}`);
+      exit(1);
+    } else {
+      console.warn(`[rateLimit] WARNING: ${msg}`);
+    }
+  }
+}
 
 /**
  * Call once during app bootstrap (before routes are registered).

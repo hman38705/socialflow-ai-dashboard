@@ -32,6 +32,14 @@ class EventBus extends EventEmitter {
   offUserJob(userId: string, listener: (event: JobProgressEvent) => void): void {
     this.off(`job:${userId}`, listener);
   }
+
+  reset(): void {
+    this.removeAllListeners();
+  }
 }
 
 export const eventBus = new EventBus();
+
+export const resetEventBus = (): void => {
+  eventBus.reset();
+};

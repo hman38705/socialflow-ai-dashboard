@@ -57,6 +57,15 @@ jobs:
           print("All Ingress resources have TLS configured.")
           EOF
 
+      - name: Validate cert-manager issuer names
+        run: |
+          # Check that prod overlay does not reference staging issuer
+          if grep -r "letsencrypt-staging" k8s/overlays/prod/; then
+            echo "ERROR: Production overlay references staging Let's Encrypt issuer"
+            exit 1
+          fi
+          echo "✓ Production overlay uses correct cert-manager issuer"
+
   security:
     name: Security Vulnerability Scan
     runs-on: ubuntu-latest
@@ -67,7 +76,11 @@ jobs:
         with:
           node-version: "20"
 
-      - name: Audit all workspace dependencies
+      - name: Audit root workspace dependencies
+        run: npm audit --audit-level=high
+
+      - name: Audit backend dependencies
+        working-directory: backend
         run: npm audit --audit-level=high
 
       - name: Detect Snyk token availability

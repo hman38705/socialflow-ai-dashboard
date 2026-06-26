@@ -3,9 +3,12 @@ kind: Kustomization
 
 resources:
   - serviceaccount.yaml
+  - role.yaml
+  - rolebinding.yaml
   - configmap.yaml
-  - secret.yaml
+  - external-secret.yaml
   - deployment.yaml
+  - worker-deployment.yaml
   - service.yaml
   - hpa.yaml
   - ingress.yaml

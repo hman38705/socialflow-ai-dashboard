@@ -1,4 +1,6 @@
 import { Router, Request, Response } from 'express';
+import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { checkPermission } from '../middleware/checkPermission';
 import { translationService } from '../services/TranslationService';
 
 const router = Router();
@@ -45,7 +47,8 @@ const router = Router();
  *       500:
  *         description: Translation failed
  */
-router.post('/translate', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/translate', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   try {
     const {
       text,
@@ -150,7 +153,8 @@ router.get('/languages', (req: Request, res: Response) => {
  *       400:
  *         description: Text is required
  */
-router.post('/detect', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/detect', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   try {
     const { text } = req.body;
 
@@ -215,7 +219,8 @@ router.post('/detect', async (req: Request, res: Response) => {
  *       400:
  *         description: Validation error
  */
-router.post('/batch', async (req: Request, res: Response) => {
+// Required permission: posts:create
+router.post('/batch', authMiddleware, checkPermission('posts:create'), async (req: Request, res: Response) => {
   try {
     const { texts, sourceLanguage, targetLanguages } = req.body;
 

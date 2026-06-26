@@ -2,10 +2,11 @@ import sharp from 'sharp';
 import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
+import { createLogger } from '../lib/logger';
 
+const logger = createLogger('image-optimization');
 const CACHE_DIR = path.join(process.cwd(), 'uploads', 'images', 'cache');
-// SUPPORTED_FORMATS reserved for future format validation
-const _SUPPORTED_FORMATS = ['jpeg', 'png', 'webp', 'gif'];
+// TODO: Implement format validation (tracked in future issue)
 
 interface OptimizationOptions {
   width?: number;
@@ -22,7 +23,7 @@ export const ImageOptimizationService = {
     try {
       await fs.mkdir(CACHE_DIR, { recursive: true });
     } catch (error) {
-      console.error('Failed to create cache directory:', error);
+      logger.error('Failed to create cache directory:', error);
     }
   },
 
@@ -108,7 +109,7 @@ export const ImageOptimizationService = {
     try {
       await fs.writeFile(cachePath, buffer);
     } catch (error) {
-      console.error('Failed to cache optimized image:', error);
+      logger.error('Failed to cache optimized image:', error);
     }
 
     const etag = `"${crypto.createHash('sha256').update(buffer).digest('hex')}"`;
@@ -145,7 +146,7 @@ export const ImageOptimizationService = {
       const files = await fs.readdir(CACHE_DIR);
       await Promise.all(files.map((file) => fs.unlink(path.join(CACHE_DIR, file))));
     } catch (error) {
-      console.error('Failed to clear cache:', error);
+      logger.error('Failed to clear cache:', error);
     }
   },
 

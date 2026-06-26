@@ -41,6 +41,7 @@ model Organization {
   name      String
   slug      String               @unique
   createdAt DateTime             @default(now())
+  deletedAt DateTime?
   members   OrganizationMember[]
   posts     Post[]
   analytics AnalyticsEntry[]
@@ -48,6 +49,7 @@ model Organization {
 
   @@index([slug])
   @@index([createdAt])
+  @@index([deletedAt])
 }
 
 model OrganizationMember {
@@ -73,6 +75,7 @@ model Post {
   scheduledAt       DateTime?
   moderationStatus  String       @default("pending")
   createdAt         DateTime     @default(now())
+  deletedAt         DateTime?
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
 
   @@index([organizationId])
@@ -80,6 +83,7 @@ model Post {
   @@index([createdAt])
   @@index([scheduledAt])
   @@index([moderationStatus])
+  @@index([deletedAt])
 }
 
 model AnalyticsEntry {
@@ -106,17 +110,19 @@ model DynamicConfig {
 }
 
 model AuditLog {
-  id         String   @id @default(uuid())
-  userId     String
-  action     String
-  resource   String?
-  resourceId String?
-  metadata   Json?
-  ipAddress  String?
-  userAgent  String?
-  createdAt  DateTime @default(now())
+  id             String   @id @default(uuid())
+  userId         String
+  action         String
+  organizationId String?
+  resource       String?
+  resourceId     String?
+  metadata       Json?
+  ipAddress      String?
+  userAgent      String?
+  createdAt      DateTime @default(now())
 
   @@index([userId, createdAt])
+  @@index([organizationId, createdAt])
   @@index([resource, resourceId])
 }
 
@@ -165,10 +171,12 @@ model WebhookSubscription {
   isActive  Boolean           @default(true)
   createdAt DateTime          @default(now())
   updatedAt DateTime          @updatedAt
+  deletedAt DateTime?
   deliveries WebhookDelivery[]
 
   @@index([isActive])
   @@index([userId])
+  @@index([deletedAt])
 }
 
 model WebhookDelivery {
@@ -192,6 +200,24 @@ model WebhookDelivery {
   @@index([createdAt])
 }
 
+model TTSJob {
+  id              String   @id
+  status          String   @default("pending")
+  progress        Int      @default(0)
+  request         Json
+  outputAudioPath String?
+  outputVideoPath String?
+  segments        Json?
+  error           String?
+  userId          String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([status])
+  @@index([userId])
+  @@index([createdAt])
+}
+
 /// Audit record written whenever a payout job fails.
 /// Captures the failure reason and timestamp for operational review.
 model PayoutFailure {
@@ -207,4 +233,57 @@ model PayoutFailure {
   @@index([jobId])
   @@index([groupId])
   @@index([failedAt])
+}
+
+/// Records Stellar transaction hashes before submission so retries
+/// can detect duplicates and avoid paying a user twice.
+model PayoutTransaction {
+  id              String   @id @default(uuid())
+  groupId         String
+  recipient       String
+  amount          Float
+  currency        String
+  transactionHash String   @unique
+  jobId           String?
+  status          String   @default("pending") // pending | submitted | confirmed | failed
+  createdAt       DateTime @default(now())
+  confirmedAt     DateTime?
+
+  @@index([groupId])
+  @@index([recipient])
+  @@index([transactionHash])
+  @@index([jobId])
+}
+
+model Subscription {
+  id                     String      @id @default(uuid())
+  userId                 String      @unique
+  plan                   String      @default("free")
+  status                 String      @default("active")
+  stripeCustomerId       String
+  stripeSubscriptionId   String?
+  creditsRemaining       Int
+  creditsMonthly         Int
+  currentPeriodEnd       DateTime?
+  createdAt              DateTime    @default(now())
+  updatedAt              DateTime    @updatedAt
+  creditLogs             CreditLog[]
+
+  @@index([userId])
+  @@index([stripeCustomerId])
+  @@index([stripeSubscriptionId])
+}
+
+model CreditLog {
+  id             String       @id @default(uuid())
+  userId         String
+  action         String
+  delta          Int
+  balanceAfter   Int
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+  subscription   Subscription @relation(fields: [userId], references: [userId], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([createdAt])
 }

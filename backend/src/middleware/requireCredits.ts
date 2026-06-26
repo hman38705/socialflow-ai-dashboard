@@ -11,15 +11,15 @@ import { CreditAction } from '../models/Subscription';
  *   router.post('/generate', authMiddleware, requireCredits('ai:generate'), handler)
  */
 export function requireCredits(action: CreditAction) {
-  return (req: AuthRequest, res: Response, next: NextFunction): void => {
-    const userId = req.userId;
+  return async (req: AuthRequest, res: Response, next: NextFunction): Promise<void> => {
+    const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ message: 'Unauthorized' });
       return;
     }
 
     try {
-      const balance = billingService.deductCredits(userId, action);
+      const balance = await billingService.deductCredits(userId, action);
       // Expose remaining balance to downstream handlers
       (req as any).creditsRemaining = balance;
       next();

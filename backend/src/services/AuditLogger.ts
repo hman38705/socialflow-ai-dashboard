@@ -8,6 +8,7 @@ const logger = createLogger('audit');
 export interface AuditContext {
   actorId: string;
   action: AuditAction;
+  organizationId?: string;
   resourceType?: string;
   resourceId?: string;
   metadata?: Record<string, unknown>;
@@ -27,6 +28,7 @@ class AuditLogger {
     AuditLogStore.append({
       actorId: ctx.actorId,
       action: ctx.action,
+      organizationId: ctx.organizationId,
       resourceType: ctx.resourceType,
       resourceId: ctx.resourceId,
       metadata: ctx.metadata,
@@ -40,6 +42,7 @@ class AuditLogger {
         data: {
           userId: ctx.actorId,
           action: ctx.action,
+          organizationId: ctx.organizationId ?? null,
           resource: ctx.resourceType ?? null,
           resourceId: ctx.resourceId ?? null,
           metadata: safeMetadata ? (safeMetadata as object) : undefined,

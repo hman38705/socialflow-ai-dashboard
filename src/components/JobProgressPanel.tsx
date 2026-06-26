@@ -4,6 +4,7 @@ import { JobState, JobProgressEvent, JobStatus } from '../hooks/useJobStream';
 interface Props {
   jobs: JobState;
   onDismiss: (jobId: string) => void;
+  onRetry?: (jobId: string) => void;
 }
 
 const STATUS_COLORS: Record<JobStatus, string> = {
@@ -29,7 +30,7 @@ function ProgressBar({ value }: { value: number }) {
   );
 }
 
-function JobCard({ job, onDismiss }: { job: JobProgressEvent; onDismiss: () => void }) {
+function JobCard({ job, onDismiss, onRetry }: { job: JobProgressEvent; onDismiss: () => void; onRetry?: () => void }) {
   const isDone = job.status === 'completed' || job.status === 'failed';
   return (
     <div className="bg-white border rounded-lg p-3 shadow-sm text-sm">
@@ -39,6 +40,15 @@ function JobCard({ job, onDismiss }: { job: JobProgressEvent; onDismiss: () => v
           <span className={`px-2 py-0.5 rounded text-xs font-medium ${STATUS_COLORS[job.status]}`}>
             {job.status}
           </span>
+          {job.status === 'failed' && onRetry && (
+            <button
+              onClick={onRetry}
+              className="text-xs px-2 py-0.5 rounded bg-blue-50 text-blue-600 hover:bg-blue-100 border border-blue-200"
+              aria-label="Retry job"
+            >
+              Retry
+            </button>
+          )}
           {isDone && (
             <button onClick={onDismiss} className="text-gray-400 hover:text-gray-600 text-xs" aria-label="Dismiss">
               ✕
@@ -60,14 +70,19 @@ function JobCard({ job, onDismiss }: { job: JobProgressEvent; onDismiss: () => v
   );
 }
 
-export default function JobProgressPanel({ jobs, onDismiss }: Props) {
+export default function JobProgressPanel({ jobs, onDismiss, onRetry }: Props) {
   const entries = Object.values(jobs);
   if (entries.length === 0) return null;
 
   return (
     <div className="fixed bottom-4 right-4 w-72 space-y-2 z-50" aria-live="polite" aria-label="Job progress">
       {entries.map((job) => (
-        <JobCard key={job.jobId} job={job} onDismiss={() => onDismiss(job.jobId)} />
+        <JobCard
+          key={job.jobId}
+          job={job}
+          onDismiss={() => onDismiss(job.jobId)}
+          onRetry={onRetry ? () => onRetry(job.jobId) : undefined}
+        />
       ))}
     </div>
   );

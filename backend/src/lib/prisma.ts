@@ -9,10 +9,17 @@ const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient };
 const tracer = trace.getTracer('socialflow-db');
 
 // Models that support soft delete (have a deletedAt field)
-const SOFT_DELETE_MODELS = new Set(['User', 'Listing']);
+const SOFT_DELETE_MODELS = new Set(['User', 'Listing', 'Post', 'Organization', 'WebhookSubscription']);
 
 // Models that should be scoped to an organization
-const ORG_SCOPED_MODELS = new Set(['Post', 'AnalyticsEntry']);
+export const ORG_SCOPED_MODELS = new Set([
+  'Post',
+  'AnalyticsEntry',
+  'Listing',
+  'OrganizationMember',
+  'AuditLog',
+  'AIGenerationResult',
+]);
 
 const POOL_DEFAULTS = {
   development: { connection_limit: 5,  pool_timeout: 10 },
@@ -25,12 +32,31 @@ function buildDatasourceUrl(): string {
   const env = config.NODE_ENV;
   const defaults = POOL_DEFAULTS[env];
 
-  const connectionLimit = config.DB_CONNECTION_LIMIT ?? defaults.connection_limit;
-  const poolTimeout     = config.DB_POOL_TIMEOUT     ?? defaults.pool_timeout;
+  let connectionLimit = config.DB_CONNECTION_LIMIT ?? defaults.connection_limit;
+  const poolTimeout   = config.DB_POOL_TIMEOUT     ?? defaults.pool_timeout;
+
+  // PgBouncer in transaction mode multiplexes server connections, so each
+  // application process must use connection_limit=1 to avoid holding idle
+  // server connections open.
+  if (config.PGBOUNCER_MODE) {
+    if (connectionLimit !== 1) {
+      console.warn(
+        `[prisma] PGBOUNCER_MODE=true detected: overriding connection_limit from ${connectionLimit} to 1. ` +
+        'PgBouncer transaction mode requires connection_limit=1 per process.',
+      );
+    }
+    connectionLimit = 1;
+  }
 
   const url = new URL(base);
   url.searchParams.set('connection_limit', String(connectionLimit));
   url.searchParams.set('pool_timeout',     String(poolTimeout));
+
+  console.log(
+    `[prisma] Effective pool config — connection_limit: ${connectionLimit}, ` +
+    `pool_timeout: ${poolTimeout}s, pgbouncer_mode: ${config.PGBOUNCER_MODE ?? false}`,
+  );
+
   return url.toString();
 }
 
