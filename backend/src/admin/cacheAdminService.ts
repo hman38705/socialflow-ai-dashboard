@@ -2,6 +2,14 @@ import Redis from 'ioredis';
 import { getRedisConnection } from '../config/runtime';
 import { Logger } from '../lib/logger';
 
+export interface CacheStats {
+  totalKeys: number;
+  usedMemoryBytes: number;
+  usedMemoryHuman: string;
+  connectedClients: number;
+  uptimeSeconds: number;
+}
+
 const chunk = <T>(items: T[], size: number): T[][] => {
   const chunks: T[][] = [];
 
@@ -86,6 +94,36 @@ export const clearCache = async (
       deletedKeys,
       dryRun: false,
     };
+  } finally {
+    redis.disconnect();
+  }
+};
+
+export const getCacheStats = async (logger: Logger): Promise<CacheStats> => {
+  const redis = new Redis(getRedisConnection());
+
+  try {
+    const [infoRaw, totalKeys] = await Promise.all([
+      redis.info('all'),
+      redis.dbsize(),
+    ]);
+
+    const extract = (field: string): string => {
+      const match = infoRaw.match(new RegExp(`${field}:(\\S+)`));
+      return match ? match[1] : '0';
+    };
+
+    const stats: CacheStats = {
+      totalKeys,
+      usedMemoryBytes: parseInt(extract('used_memory'), 10),
+      usedMemoryHuman: extract('used_memory_human'),
+      connectedClients: parseInt(extract('connected_clients'), 10),
+      uptimeSeconds: parseInt(extract('uptime_in_seconds'), 10),
+    };
+
+    logger.info('Cache stats collected', stats);
+
+    return stats;
   } finally {
     redis.disconnect();
   }
