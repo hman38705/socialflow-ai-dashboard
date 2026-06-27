@@ -7,7 +7,7 @@
  *  3. Unknown-flag behavior — returns false, never throws
  */
 
-import { FeatureService, FeatureFlag } from '../FeatureService';
+import { FeatureService } from '../FeatureService';
 import { DynamicConfigService } from '../DynamicConfigService';
 
 // ---------------------------------------------------------------------------
@@ -22,23 +22,6 @@ jest.mock('../../lib/prisma', () => ({
     },
   },
 }));
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Inject a flag directly into the DynamicConfigService singleton cache so
- * FeatureService.isEnabled() can read it synchronously without a real DB.
- */
-function seedFlag(flagName: string, flag: FeatureFlag): void {
-  const key = `FEATURE_FLAG:${flagName}`;
-  const svc = (DynamicConfigService as any).getCachedInstance() as DynamicConfigService | null;
-  if (svc) {
-    // Write directly into the internal cache map
-    (svc as any).cache.set(key, flag);
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Setup

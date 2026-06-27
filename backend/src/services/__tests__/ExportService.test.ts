@@ -13,34 +13,44 @@ import { Response } from 'express';
 
 // ---------------------------------------------------------------------------
 // Mocks
+// Note: jest.mock is hoisted — the factory must not reference variables
+// declared above it. Access mocks via require() inside tests instead.
 // ---------------------------------------------------------------------------
-
-// replicaClient is used for CSV streams (read-only path)
-const mockReplicaAnalyticsFindMany = jest.fn();
-const mockReplicaPostFindMany = jest.fn();
 
 jest.mock('../../lib/readReplica', () => ({
   replicaClient: {
-    analyticsEntry: { findMany: mockReplicaAnalyticsFindMany },
-    post: { findMany: mockReplicaPostFindMany },
+    analyticsEntry: { findMany: jest.fn() },
+    post: { findMany: jest.fn() },
   },
   applyReadWriteSplitting: jest.fn(),
 }));
 
-// prisma is used for JSON streams
-const mockPrismaAnalyticsFindMany = jest.fn();
-const mockPrismaPostFindMany = jest.fn();
-
 jest.mock('../../lib/prisma', () => ({
   prisma: {
-    analyticsEntry: { findMany: mockPrismaAnalyticsFindMany },
-    post: { findMany: mockPrismaPostFindMany },
+    analyticsEntry: { findMany: jest.fn() },
+    post: { findMany: jest.fn() },
   },
 }));
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+function getReplicaMocks() {
+  const { replicaClient } = require('../../lib/readReplica');
+  return {
+    analyticsFindMany: replicaClient.analyticsEntry.findMany as jest.Mock,
+    postFindMany: replicaClient.post.findMany as jest.Mock,
+  };
+}
+
+function getPrismaMocks() {
+  const { prisma } = require('../../lib/prisma');
+  return {
+    analyticsFindMany: prisma.analyticsEntry.findMany as jest.Mock,
+    postFindMany: prisma.post.findMany as jest.Mock,
+  };
+}
 
 /** Capture all chunks pushed to a Readable that is piped into a mock Response. */
 function captureStream(mockRes: Partial<Response>): string[] {
@@ -71,10 +81,12 @@ const ORG = 'org-test-123';
 
 beforeEach(() => {
   jest.clearAllMocks();
-  mockReplicaAnalyticsFindMany.mockResolvedValue([]);
-  mockReplicaPostFindMany.mockResolvedValue([]);
-  mockPrismaAnalyticsFindMany.mockResolvedValue([]);
-  mockPrismaPostFindMany.mockResolvedValue([]);
+  const replica = getReplicaMocks();
+  const prisma = getPrismaMocks();
+  replica.analyticsFindMany.mockResolvedValue([]);
+  replica.postFindMany.mockResolvedValue([]);
+  prisma.analyticsFindMany.mockResolvedValue([]);
+  prisma.postFindMany.mockResolvedValue([]);
 });
 
 // ---------------------------------------------------------------------------
@@ -117,6 +129,7 @@ describe('ExportService.streamAnalyticsAsCSV — CSV generation', () => {
   });
 
   it('serializes an analytics row to a correctly formatted CSV line', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const row = {
       id: 'entry-1',
       organizationId: ORG,
@@ -125,7 +138,7 @@ describe('ExportService.streamAnalyticsAsCSV — CSV generation', () => {
       value: 420,
       recordedAt: new Date('2025-06-15T00:00:00.000Z'),
     };
-    mockReplicaAnalyticsFindMany.mockResolvedValueOnce([row]).mockResolvedValueOnce([]);
+    analyticsFindMany.mockResolvedValueOnce([row]).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     const chunks = captureStream(res);
@@ -140,6 +153,7 @@ describe('ExportService.streamAnalyticsAsCSV — CSV generation', () => {
   });
 
   it('uses cursor-based pagination — second batch uses cursor from first', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const batch1 = Array.from({ length: 1001 }, (_, i) => ({
       id: `id-${String(i).padStart(4, '0')}`,
       organizationId: ORG,
@@ -149,15 +163,13 @@ describe('ExportService.streamAnalyticsAsCSV — CSV generation', () => {
       recordedAt: new Date('2025-06-15'),
     }));
 
-    mockReplicaAnalyticsFindMany
-      .mockResolvedValueOnce(batch1)
-      .mockResolvedValueOnce([]);
+    analyticsFindMany.mockResolvedValueOnce(batch1).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     await ExportService.streamAnalyticsAsCSV(ORG, START, END, res as Response);
 
-    expect(mockReplicaAnalyticsFindMany).toHaveBeenCalledTimes(2);
-    expect(mockReplicaAnalyticsFindMany).toHaveBeenNthCalledWith(
+    expect(analyticsFindMany).toHaveBeenCalledTimes(2);
+    expect(analyticsFindMany).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
         cursor: { id: 'id-0999' },
@@ -204,6 +216,7 @@ describe('ExportService.streamAnalyticsAsJSON — JSON streaming', () => {
   });
 
   it('emits one JSON object per line (NDJSON format)', async () => {
+    const { analyticsFindMany } = getPrismaMocks();
     const rows = [
       {
         id: 'a-1',
@@ -222,7 +235,7 @@ describe('ExportService.streamAnalyticsAsJSON — JSON streaming', () => {
         recordedAt: new Date('2025-03-02T00:00:00.000Z'),
       },
     ];
-    mockPrismaAnalyticsFindMany.mockResolvedValueOnce(rows).mockResolvedValueOnce([]);
+    analyticsFindMany.mockResolvedValueOnce(rows).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     const chunks = captureStream(res);
@@ -257,9 +270,10 @@ describe('ExportService.streamAnalyticsAsJSON — JSON streaming', () => {
 
 describe('ExportService — org-scoped query validation (analytics)', () => {
   it('CSV stream filters by organizationId', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const res = makeMockRes();
     await ExportService.streamAnalyticsAsCSV('org-abc', START, END, res as Response);
-    expect(mockReplicaAnalyticsFindMany).toHaveBeenCalledWith(
+    expect(analyticsFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ organizationId: 'org-abc' }),
       }),
@@ -267,9 +281,10 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
   });
 
   it('JSON stream filters by organizationId', async () => {
+    const { analyticsFindMany } = getPrismaMocks();
     const res = makeMockRes();
     await ExportService.streamAnalyticsAsJSON('org-xyz', START, END, res as Response);
-    expect(mockPrismaAnalyticsFindMany).toHaveBeenCalledWith(
+    expect(analyticsFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ organizationId: 'org-xyz' }),
       }),
@@ -277,6 +292,7 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
   });
 
   it('CSV stream never leaks data from another org', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const otherOrgRow = {
       id: 'other-1',
       organizationId: 'org-other',
@@ -285,8 +301,7 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
       value: 99,
       recordedAt: new Date('2025-05-01'),
     };
-    // Return rows only when queried for org-other, not for org-abc
-    mockReplicaAnalyticsFindMany.mockImplementation(({ where }: any) => {
+    analyticsFindMany.mockImplementation(({ where }: any) => {
       if (where.organizationId === 'org-abc') return Promise.resolve([]);
       return Promise.resolve([otherOrgRow]);
     });
@@ -301,12 +316,13 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
   });
 
   it('CSV stream applies both gte and lte date range filters', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const res = makeMockRes();
     const start = new Date('2025-03-01');
     const end = new Date('2025-03-31');
     await ExportService.streamAnalyticsAsCSV(ORG, start, end, res as Response);
 
-    expect(mockReplicaAnalyticsFindMany).toHaveBeenCalledWith(
+    expect(analyticsFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           recordedAt: { gte: start, lte: end },
@@ -316,12 +332,13 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
   });
 
   it('JSON stream applies both gte and lte date range filters', async () => {
+    const { analyticsFindMany } = getPrismaMocks();
     const res = makeMockRes();
     const start = new Date('2025-04-01');
     const end = new Date('2025-04-30');
     await ExportService.streamAnalyticsAsJSON(ORG, start, end, res as Response);
 
-    expect(mockPrismaAnalyticsFindMany).toHaveBeenCalledWith(
+    expect(analyticsFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           recordedAt: { gte: start, lte: end },
@@ -331,13 +348,13 @@ describe('ExportService — org-scoped query validation (analytics)', () => {
   });
 
   it('different org IDs produce distinct queries', async () => {
+    const { analyticsFindMany } = getReplicaMocks();
     const resA = makeMockRes();
     const resB = makeMockRes();
     await ExportService.streamAnalyticsAsCSV('org-A', START, END, resA as Response);
     await ExportService.streamAnalyticsAsCSV('org-B', START, END, resB as Response);
 
-    const calls = (mockReplicaAnalyticsFindMany as jest.Mock).mock.calls;
-    const orgIds = calls.map((c: any) => c[0].where.organizationId);
+    const orgIds = analyticsFindMany.mock.calls.map((c: any) => c[0].where.organizationId);
     expect(orgIds).toContain('org-A');
     expect(orgIds).toContain('org-B');
   });
@@ -371,6 +388,7 @@ describe('ExportService.streamPostsAsCSV — CSV generation', () => {
   });
 
   it('escapes double-quotes in post content per RFC 4180', async () => {
+    const { postFindMany } = getReplicaMocks();
     const post = {
       id: 'p-1',
       organizationId: ORG,
@@ -379,18 +397,18 @@ describe('ExportService.streamPostsAsCSV — CSV generation', () => {
       scheduledAt: null,
       createdAt: new Date('2025-06-01'),
     };
-    mockReplicaPostFindMany.mockResolvedValueOnce([post]).mockResolvedValueOnce([]);
+    postFindMany.mockResolvedValueOnce([post]).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     const chunks = captureStream(res);
     await ExportService.streamPostsAsCSV(ORG, START, END, res as Response);
 
     const output = chunks.join('');
-    // RFC 4180: embedded quotes are doubled
     expect(output).toContain('""hello world""');
   });
 
   it('handles null scheduledAt gracefully (outputs empty string)', async () => {
+    const { postFindMany } = getReplicaMocks();
     const post = {
       id: 'p-2',
       organizationId: ORG,
@@ -399,7 +417,7 @@ describe('ExportService.streamPostsAsCSV — CSV generation', () => {
       scheduledAt: null,
       createdAt: new Date('2025-06-02'),
     };
-    mockReplicaPostFindMany.mockResolvedValueOnce([post]).mockResolvedValueOnce([]);
+    postFindMany.mockResolvedValueOnce([post]).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     const chunks = captureStream(res);
@@ -411,9 +429,10 @@ describe('ExportService.streamPostsAsCSV — CSV generation', () => {
   });
 
   it('filters posts by organizationId', async () => {
+    const { postFindMany } = getReplicaMocks();
     const res = makeMockRes();
     await ExportService.streamPostsAsCSV('org-posts-scope', START, END, res as Response);
-    expect(mockReplicaPostFindMany).toHaveBeenCalledWith(
+    expect(postFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ organizationId: 'org-posts-scope' }),
       }),
@@ -421,12 +440,13 @@ describe('ExportService.streamPostsAsCSV — CSV generation', () => {
   });
 
   it('uses createdAt date range for posts query', async () => {
+    const { postFindMany } = getReplicaMocks();
     const res = makeMockRes();
     const start = new Date('2025-02-01');
     const end = new Date('2025-02-28');
     await ExportService.streamPostsAsCSV(ORG, start, end, res as Response);
 
-    expect(mockReplicaPostFindMany).toHaveBeenCalledWith(
+    expect(postFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({
           createdAt: { gte: start, lte: end },
@@ -460,6 +480,7 @@ describe('ExportService.streamPostsAsJSON — JSON streaming', () => {
   });
 
   it('emits one valid JSON object per line', async () => {
+    const { postFindMany } = getPrismaMocks();
     const posts = [
       {
         id: 'post-a',
@@ -478,7 +499,7 @@ describe('ExportService.streamPostsAsJSON — JSON streaming', () => {
         createdAt: new Date('2025-05-11T12:00:00.000Z'),
       },
     ];
-    mockPrismaPostFindMany.mockResolvedValueOnce(posts).mockResolvedValueOnce([]);
+    postFindMany.mockResolvedValueOnce(posts).mockResolvedValueOnce([]);
 
     const res = makeMockRes();
     const chunks = captureStream(res);
@@ -492,9 +513,10 @@ describe('ExportService.streamPostsAsJSON — JSON streaming', () => {
   });
 
   it('filters posts by organizationId in JSON stream', async () => {
+    const { postFindMany } = getPrismaMocks();
     const res = makeMockRes();
     await ExportService.streamPostsAsJSON('org-json-scope', START, END, res as Response);
-    expect(mockPrismaPostFindMany).toHaveBeenCalledWith(
+    expect(postFindMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: expect.objectContaining({ organizationId: 'org-json-scope' }),
       }),
