@@ -150,6 +150,35 @@ describe('WorkerMonitor - Exponential Backoff', () => {
     );
   });
 
+  it('should cap backoff at the 5-minute hard limit even when restartBackoffMaxMs exceeds it', async () => {
+    // Configure restartBackoffMaxMs (10 min) intentionally above the hard cap (5 min = 300000 ms)
+    const highMaxMonitor = new WorkerMonitor({
+      connection: { host: 'localhost', port: 6379 },
+      restartBackoffBaseMs: 1000,
+      restartBackoffMaxMs: 10 * 60 * 1000, // 10 minutes — exceeds MAX_BACKOFF_MS
+      maxRestartsPerHour: 20,
+      alertHandler,
+    });
+
+    highMaxMonitor.registerWorker('high-max-worker', 'test-queue', mockWorkerFactory);
+
+    // Drive consecutiveRestarts high enough that the uncapped exponential would exceed 5 min
+    // 2^9 * 1000 = 512000 ms > 300000 ms (5 min hard cap)
+    for (let i = 0; i < 9; i++) {
+      const p = (highMaxMonitor as any).restartWorker('high-max-worker', { reason: 'test' });
+      jest.advanceTimersByTime(300000);
+      await p;
+    }
+
+    expect(alertHandler).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({
+          backoffDelayMs: 300000, // Hard cap: 5 minutes regardless of config
+        }),
+      }),
+    );
+  });
+
   it('should respect maxRestartsPerHour limit even with backoff', async () => {
     const limitedMonitor = new WorkerMonitor({
       connection: { host: 'localhost', port: 6379 },
