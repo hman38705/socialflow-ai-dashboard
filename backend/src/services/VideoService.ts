@@ -90,7 +90,7 @@ async function transcodeVideo(
         resolve({ quality: quality.name, format: format.extension, path: outputPath, size: stats.size });
       })
       .on('error', (err: Error) => {
-        fs.rm(outputPath, { force: true }).catch(() => {});
+        fs.rm(outputPath, { force: true }).catch((rmErr) => logger.warn('Failed to clean up temp video file', { path: outputPath, error: rmErr }));
         reject(err);
       })
       .save(outputPath);
@@ -135,7 +135,7 @@ async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
             eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'processing', progress, message: `Transcoding ${progress}%` });
           }
         } catch (error) {
-          await fs.rm(outputPath, { force: true }).catch(() => {});
+          await fs.rm(outputPath, { force: true }).catch((rmErr) => logger.warn('Failed to clean up temp video file', { path: outputPath, error: rmErr }));
           logger.error(`Failed to transcode ${quality.name} ${format.extension}:`, { error });
         }
       }
@@ -149,7 +149,7 @@ async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
       eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'completed', progress: 100, message: 'Job completed' });
     }
   } finally {
-    await fs.unlink(inputPath).catch(() => {});
+    await fs.unlink(inputPath).catch((unlinkErr) => logger.warn('Failed to clean up temp video file', { path: inputPath, error: unlinkErr }));
   }
 }
 
