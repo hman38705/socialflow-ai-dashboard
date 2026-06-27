@@ -1,3 +1,7 @@
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('prisma-soft-delete');
+
 // Prisma v7 removed Prisma.Middleware from the public API; define params locally.
 type MiddlewareParams = {
   model?: string;
@@ -28,7 +32,7 @@ export const softDeleteMiddleware = async (params: MiddlewareParams, next: Next)
     if (params.model === 'Post' && params.args.where?.id) {
       const { deletePost } = await import('../services/SearchService');
       deletePost(params.args.where.id).catch((err) => {
-        console.error('Failed to remove post from search index', { id: params.args.where.id, error: err });
+        logger.error('Failed to remove post from search index', { id: params.args.where.id, error: err });
       });
     }
     
@@ -57,7 +61,7 @@ export const softDeleteMiddleware = async (params: MiddlewareParams, next: Next)
         .index('posts')
         .deleteDocuments(idsToRemove)
         .catch((err: Error) => {
-          console.error('Failed to remove posts from search index', { count: idsToRemove.length, error: err });
+          logger.error('Failed to remove posts from search index', { count: idsToRemove.length, error: err });
         });
     }
 
