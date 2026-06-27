@@ -75,6 +75,7 @@ backend/uploads/
 .terraform.lock.hcl
 
 # Project Tracking
+Somzilla.md
 somzilla.md
 
 # OS
