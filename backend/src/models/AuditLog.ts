@@ -30,7 +30,9 @@ export type AuditAction =
   | 'ai:generate'
   | 'ai:analyze'
   // Health
-  | 'health:config:update';
+  | 'health:config:update'
+  // Moderation
+  | 'moderation:config:fail-open';
 
 export interface AuditLog {
   id: string;

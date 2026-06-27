@@ -20,6 +20,12 @@ jest.mock('../lib/logger', () => ({
   createLogger: () => ({ warn: warnSpy, error: errorSpy, info: jest.fn() }),
 }));
 
+// ── AuditLogger stub ──────────────────────────────────────────────────────────
+const auditLogSpy = jest.fn().mockResolvedValue(undefined);
+jest.mock('../services/AuditLogger', () => ({
+  auditLogger: { log: auditLogSpy },
+}));
+
 // Set a key so the module loads in "configured" state by default;
 // individual tests override as needed.
 process.env.OPENAI_API_KEY = 'test-key';
@@ -45,6 +51,7 @@ afterEach(() => {
   nock.cleanAll();
   warnSpy.mockClear();
   errorSpy.mockClear();
+  auditLogSpy.mockClear();
   process.env.OPENAI_API_KEY = 'test-key';
   delete process.env.MODERATION_MODE;
 });
@@ -153,5 +160,70 @@ describe('malformed API response', () => {
     const result = await ModerationService.moderate('hello');
     expect(result.flagged).toBe(false);
     expect(result.blocked).toBe(false);
+  });
+});
+
+// ── Fail-open audit trail ─────────────────────────────────────────────────────
+//
+// The module writes a discrete audit entry the FIRST time getMode() returns
+// 'fail-open'. All subsequent calls in the same process must not re-emit it.
+// Because the module-level flag persists across the whole test file, we use
+// jest.isolateModules to get a fresh module with a reset flag for this block.
+
+describe('fail-open mode — one-time audit entry', () => {
+  let isolatedModerate: typeof ModerationService.moderate;
+  let isolatedAuditSpy: jest.Mock;
+
+  beforeEach(async () => {
+    isolatedAuditSpy = jest.fn().mockResolvedValue(undefined);
+
+    await new Promise<void>((resolve) => {
+      jest.isolateModules(() => {
+        jest.mock('../lib/logger', () => ({
+          createLogger: () => ({ warn: jest.fn(), error: jest.fn(), info: jest.fn() }),
+        }));
+        jest.mock('../services/AuditLogger', () => ({
+          auditLogger: { log: isolatedAuditSpy },
+        }));
+        // DynamicConfigService is imported by ModerationService; stub it out
+        jest.mock('../services/DynamicConfigService', () => ({
+          DynamicConfigService: { getCachedInstance: () => null },
+          ConfigKey: { MODERATION_SENSITIVITY: 'moderation_sensitivity' },
+        }));
+        const mod = require('../services/ModerationService');
+        isolatedModerate = mod.ModerationService.moderate.bind(mod.ModerationService);
+        resolve();
+      });
+    });
+  });
+
+  it('emits the audit entry on the first fail-open call', async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.MODERATION_MODE = 'fail-open';
+    await isolatedModerate('first call');
+    // Wait a tick so the non-blocking auditLogger.log promise can resolve
+    await new Promise((r) => setImmediate(r));
+    expect(isolatedAuditSpy).toHaveBeenCalledTimes(1);
+    expect(isolatedAuditSpy).toHaveBeenCalledWith(
+      expect.objectContaining({ action: 'moderation:config:fail-open' }),
+    );
+  });
+
+  it('emits the audit entry exactly once across multiple fail-open calls', async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.MODERATION_MODE = 'fail-open';
+    await isolatedModerate('call 1');
+    await isolatedModerate('call 2');
+    await isolatedModerate('call 3');
+    await new Promise((r) => setImmediate(r));
+    expect(isolatedAuditSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not emit the audit entry in fail-closed mode', async () => {
+    delete process.env.OPENAI_API_KEY;
+    process.env.MODERATION_MODE = 'fail-closed';
+    await isolatedModerate('fail-closed call').catch(() => {});
+    await new Promise((r) => setImmediate(r));
+    expect(isolatedAuditSpy).not.toHaveBeenCalled();
   });
 });
