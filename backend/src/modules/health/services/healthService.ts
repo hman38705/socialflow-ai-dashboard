@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { injectable, inject, optional } from 'inversify';
 import { HealthMonitor } from './healthMonitor';
 import { TYPES } from '../config/inversify.config';
+import { redis } from '../../../lib/redis';
 
 @injectable()
 class HealthService {
@@ -16,18 +17,13 @@ class HealthService {
     this.healthMonitor = monitor;
   }
 
-  /**
-   * Helper function to simulate a latency check.
-   */
   private async simulateCheck(
     serviceName: string,
     baseLatency: number,
   ): Promise<{ status: string; latency: number; lastChecked: string; errorRate: number }> {
     const latency = baseLatency + Math.floor(Math.random() * 20);
-    // Simulate delay
     await new Promise((resolve) => setTimeout(resolve, latency));
 
-    // Simulate occasional unhealthy for Twitter
     const isUnhealthy = serviceName === 'twitter' && Math.random() < 0.2;
     const errorRate = isUnhealthy ? Math.random() * 30 : Math.random() * 2;
 
@@ -51,7 +47,26 @@ class HealthService {
   }
 
   public async checkRedis() {
-    return this.simulateCheck('redis', 5);
+    const start = Date.now();
+    try {
+      await redis.ping();
+      this.failureCounters.set('redis', 0);
+      return {
+        status: 'healthy',
+        latency: Date.now() - start,
+        errorRate: 0,
+        lastChecked: new Date().toISOString(),
+      };
+    } catch (err) {
+      const count = (this.failureCounters.get('redis') || 0) + 1;
+      this.failureCounters.set('redis', count);
+      return {
+        status: 'unhealthy',
+        latency: Date.now() - start,
+        errorRate: 100,
+        lastChecked: new Date().toISOString(),
+      };
+    }
   }
 
   public async checkS3() {
@@ -75,7 +90,6 @@ class HealthService {
     const isUnhealthy = Object.values(dependencies).some((dep) => dep.status !== 'healthy');
     const overallStatus = isUnhealthy ? 'unhealthy' : 'healthy';
 
-    // Record metrics for monitoring
     if (this.healthMonitor) {
       await Promise.all(
         Object.entries(dependencies).map(([service, metric]) =>
