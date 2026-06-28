@@ -118,6 +118,33 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
     });
   });
 
+  describe('Pending Migration Detection', () => {
+    it('should identify pending migrations before migration run', async () => {
+      const statusesBefore = await listMigrations();
+      expect(statusesBefore.length).toBeGreaterThan(0);
+      expect(statusesBefore.every((status) => status.applied === false)).toBe(true);
+
+      const result = await runMigrations({ dryRun: false }, mockLogger);
+      expect(result.executed.length).toBeGreaterThan(0);
+      expect(result.lockAcquired).toBe(true);
+
+      const statusesAfter = await listMigrations();
+      expect(statusesAfter.some((status) => status.applied)).toBe(true);
+    });
+
+    it('should list migrations as pending when dry-run is used', async () => {
+      const statusesBefore = await listMigrations();
+      expect(statusesBefore.every((status) => status.applied === false)).toBe(true);
+
+      const result = await runMigrations({ dryRun: true }, mockLogger);
+      expect(result.dryRun).toBe(true);
+      expect(result.executed.length).toBeGreaterThan(0);
+
+      const statusesAfter = await listMigrations();
+      expect(statusesAfter.every((status) => status.applied === false)).toBe(true);
+    });
+  });
+
   describe('Checksum & Metadata Tracking', () => {
     it('should calculate consistent checksums for migration functions', async () => {
       const result = await runMigrations(

@@ -1,5 +1,7 @@
 import { logger } from '../lib/logger';
 
+type TwilioClientType = ReturnType<typeof import('twilio')>;
+
 export interface SmsServiceConfig {
   accountSid?: string;
   authToken?: string;
@@ -13,7 +15,7 @@ export interface SmsResult {
 }
 
 export class SmsService {
-  private twilioClient: any;
+  private twilioClient: TwilioClientType | null = null;
   private fromNumber: string | undefined;
   private enabled: boolean;
 
@@ -24,7 +26,7 @@ export class SmsService {
     if (this.enabled) {
       try {
         // Lazy load Twilio SDK only if credentials are provided
-        const twilio = require('twilio');
+        const twilio = require('twilio') as typeof import('twilio');
         this.twilioClient = twilio(config.accountSid, config.authToken);
         logger.info('[sms-service] Twilio SMS service initialized');
       } catch (error) {
@@ -48,7 +50,7 @@ export class SmsService {
     }
 
     try {
-      const result = await this.twilioClient.messages.create({
+      const result = await this.twilioClient!.messages.create({
         body: message,
         from: this.fromNumber,
         to,
