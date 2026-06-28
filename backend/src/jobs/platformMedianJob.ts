@@ -19,10 +19,11 @@ const CACHE_TTL_SECONDS = 3600; // 1 hour
 let queue: Queue | null = null;
 let worker: Worker | null = null;
 
-/** Compute per-platform medians from AnalyticsEntry rows. */
+/** Compute per-platform medians from AnalyticsEntry rows in the last 30 days. */
 export async function computePlatformMedians(): Promise<PlatformMedians> {
+  const thirtyDaysAgo = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
   const rows = await prisma.analyticsEntry.findMany({
-    where: { metric: { in: ['reach', 'engagement'] } },
+    where: { metric: { in: ['reach', 'engagement'] }, recordedAt: { gte: thirtyDaysAgo } },
     select: { platform: true, metric: true, value: true },
   });
 
