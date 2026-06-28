@@ -189,7 +189,26 @@ export class CohortService {
    *   Churned Users    – had posts but inactive 90+ days
    *   Lurkers          – 0 posts
    */
+  /**
+   * Throws when a record is missing/malformed required fields (e.g. a schema
+   * migration left `daysSinceJoined`/`postCount` null or non-numeric for some
+   * rows). Callers catch this per-record so one bad row doesn't abort the
+   * whole batch.
+   */
+  private assertValidStats(s: UserActivityStats): void {
+    if (!s.userId) {
+      throw new Error('cohort record missing userId');
+    }
+    if (typeof s.postCount !== 'number' || Number.isNaN(s.postCount)) {
+      throw new Error(`cohort record ${s.userId} has malformed postCount`);
+    }
+    if (typeof s.daysSinceJoined !== 'number' || Number.isNaN(s.daysSinceJoined)) {
+      throw new Error(`cohort record ${s.userId} has malformed daysSinceJoined`);
+    }
+  }
+
   private classifyUser(s: UserActivityStats): CohortLabel {
+    this.assertValidStats(s);
     if (s.daysSinceJoined <= 7) return 'New Users';
     if (s.postCount === 0) return 'Lurkers';
 
@@ -204,12 +223,30 @@ export class CohortService {
 
   private segmentUsers(stats: UserActivityStats[]): CohortSegment[] {
     const groups = new Map<CohortLabel, string[]>();
+    let skipped = 0;
 
     for (const s of stats) {
-      const label = this.classifyUser(s);
+      let label: CohortLabel;
+      try {
+        label = this.classifyUser(s);
+      } catch (err) {
+        skipped += 1;
+        logger.warn('Skipping malformed cohort record', {
+          userId: s?.userId ?? 'unknown',
+          error: err instanceof Error ? err.message : String(err),
+        });
+        continue;
+      }
       const existing = groups.get(label) ?? [];
       existing.push(s.userId);
       groups.set(label, existing);
+    }
+
+    if (skipped > 0) {
+      logger.warn('Cohort segmentation completed with skipped records', {
+        skipped,
+        processed: stats.length - skipped,
+      });
     }
 
     const now = new Date();
