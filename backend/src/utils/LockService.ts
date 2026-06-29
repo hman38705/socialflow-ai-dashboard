@@ -89,11 +89,17 @@ export const LockService = {
    * Acquire a lock and execute a function.
    * A background interval extends the lock TTL every TTL/2 ms so the lock
    * is held for the full duration of the operation even when it exceeds the
-   * initial TTL.
+   * initial TTL. `fn` receives an AbortSignal that is aborted if a TTL
+   * extension fails (e.g. Redis down) — the operation should stop work and
+   * the overall call rejects so a second worker is never let in alongside it.
    *
    * If Redis is unavailable, falls back to a local in-process AsyncMutex.
    */
-  async withLock<T>(key: string, fn: () => Promise<T>, options: LockOptions = {}): Promise<T> {
+  async withLock<T>(
+    key: string,
+    fn: (signal: AbortSignal) => Promise<T>,
+    options: LockOptions = {},
+  ): Promise<T> {
     const duration = options.duration || 30000; // 30 seconds default
     const lockKey = `lock:${key}`;
 
@@ -104,7 +110,7 @@ export const LockService = {
       const mutex = getLocalMutex(key);
       const release = await mutex.acquire();
       try {
-        return await fn();
+        return await fn(new AbortController().signal);
       } finally {
         release();
       }
@@ -116,6 +122,9 @@ export const LockService = {
       logger.info(`Lock acquired: ${lockKey}`);
 
       // Extend the lock TTL every TTL/2 ms while the operation is running.
+      // If an extension fails, abort the operation rather than letting it
+      // keep running after the lock may have already expired in Redis.
+      const abortController = new AbortController();
       let currentLock = lock;
       const extendInterval = setInterval(async () => {
         try {
@@ -125,11 +134,18 @@ export const LockService = {
           logger.warn(`Failed to extend lock: ${lockKey}`, {
             error: extErr instanceof Error ? extErr.message : String(extErr),
           });
+          abortController.abort(extErr);
         }
       }, Math.floor(duration / 2));
 
+      const aborted = new Promise<never>((_, reject) => {
+        abortController.signal.addEventListener('abort', () =>
+          reject(new Error(`Lock TTL refresh failed for ${key}; operation aborted`)),
+        );
+      });
+
       try {
-        return await fn();
+        return await Promise.race([fn(abortController.signal), aborted]);
       } finally {
         clearInterval(extendInterval);
         await currentLock.unlock().catch((err) => {

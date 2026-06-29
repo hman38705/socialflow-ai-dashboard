@@ -79,21 +79,24 @@ export function verifySignature(options: VerifySignatureOptions) {
     const requestId = (req as any).requestId as string | undefined;
 
     // ── 1. Extract headers ──────────────────────────────────────────────────
+    // The timestamp must be checked before anything else (including HMAC
+    // computation) so the replay window can never be bypassed by omitting it.
     const rawTimestamp = req.headers[timestampHeader] as string | undefined;
+
+    if (!rawTimestamp) {
+      logger.warn('Missing timestamp header', { requestId, path: req.path, method: req.method });
+      res.status(401).json({ error: 'Missing timestamp' });
+      return;
+    }
+
     const rawSignature = req.headers[signatureHeader] as string | undefined;
 
-    if (!rawTimestamp || !rawSignature) {
-      logger.warn('Missing signature headers', {
-        requestId,
-        path: req.path,
-        method: req.method,
-        missingTimestamp: !rawTimestamp,
-        missingSignature: !rawSignature,
-      });
+    if (!rawSignature) {
+      logger.warn('Missing signature header', { requestId, path: req.path, method: req.method });
       res.status(401).json({
         success: false,
         code: 'MISSING_SIGNATURE_HEADERS',
-        message: `Required headers '${timestampHeader}' and '${signatureHeader}' must be present.`,
+        message: `Required header '${signatureHeader}' must be present.`,
       });
       return;
     }

@@ -13,7 +13,7 @@ jest.mock('../../lib/logger', () => ({
   createLogger: () => ({ info: jest.fn(), warn: jest.fn(), error: jest.fn() }),
 }));
 
-import { facebookService } from '../FacebookService';
+import { facebookService, AuthRefreshError } from '../FacebookService';
 
 describe('FacebookService', () => {
   beforeAll(() => nock.disableNetConnect());
@@ -85,5 +85,44 @@ describe('FacebookService', () => {
     await expect(
       facebookService.getPostComments('1234', 'post-123', 'page-token'),
     ).rejects.toThrow(/Failed to fetch comments/);
+  });
+
+  describe('ensureFreshToken', () => {
+    const baseTokens = {
+      accessToken: 'old-token',
+      expiresAt: 0,
+      pages: [],
+    };
+
+    it('returns the same tokens unchanged when not near expiry', async () => {
+      const tokens = { ...baseTokens, expiresAt: Date.now() + 30 * 24 * 60 * 60 * 1000 };
+      const result = await facebookService.ensureFreshToken(tokens);
+      expect(result).toEqual(tokens);
+    });
+
+    it('refreshes the token when within the refresh window', async () => {
+      const tokens = { ...baseTokens, expiresAt: Date.now() + 60 * 1000 };
+      const newExpiresAt = Date.now() + 5184000 * 1000;
+
+      nock('https://graph.facebook.com')
+        .get('/v18.0/oauth/access_token')
+        .query(true)
+        .reply(200, { access_token: 'new-token', expires_in: 5184000 });
+
+      const result = await facebookService.ensureFreshToken(tokens);
+      expect(result.accessToken).toBe('new-token');
+      expect(result.expiresAt).toBeGreaterThanOrEqual(newExpiresAt - 1000);
+    });
+
+    it('throws AuthRefreshError when the refresh attempt fails', async () => {
+      const tokens = { ...baseTokens, expiresAt: Date.now() + 60 * 1000 };
+
+      nock('https://graph.facebook.com')
+        .get('/v18.0/oauth/access_token')
+        .query(true)
+        .reply(400, { error: { message: 'Invalid token' } });
+
+      await expect(facebookService.ensureFreshToken(tokens)).rejects.toThrow(AuthRefreshError);
+    });
   });
 });

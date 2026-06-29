@@ -1,6 +1,59 @@
-import { Job } from 'bullmq';
+import { Job, UnrecoverableError } from 'bullmq';
+import { Counter } from 'prom-client';
 import { queueManager } from '../queues/queueManager';
 import { EmailJobData } from '../queues/emailQueue';
+import { register } from '../lib/metrics';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('email-job');
+
+/**
+ * SES error codes that will never succeed on retry (bad recipient, malformed
+ * params, etc). These are dropped immediately instead of exhausting retries.
+ */
+const NON_RETRYABLE_SES_CODES = new Set([
+  'MessageRejected',
+  'InvalidParameterValue',
+  'MailFromDomainNotVerifiedException',
+  'ConfigurationSetDoesNotExistException',
+  'AccountSendingPausedException',
+]);
+
+export const emailDroppedTotal = new Counter({
+  name: 'email_dropped_total',
+  help: 'Total number of emails dropped due to a non-retryable SES error',
+  labelNames: ['code'] as const,
+  registers: [register],
+});
+
+/** Alert once the number of drops in the current process reaches this many. */
+const DROPPED_RATE_ALERT_THRESHOLD = Number(process.env.EMAIL_DROPPED_RATE_ALERT_THRESHOLD ?? 10);
+let droppedSinceLastAlert = 0;
+
+function getSesErrorCode(error: any): string | undefined {
+  return error?.Code || error?.code || error?.name;
+}
+
+function isNonRetryableSesError(error: any): boolean {
+  const code = getSesErrorCode(error);
+  return !!code && NON_RETRYABLE_SES_CODES.has(code);
+}
+
+async function dropEmail(job: Job<EmailJobData>, error: any): Promise<void> {
+  const code = getSesErrorCode(error) ?? 'Unknown';
+  emailDroppedTotal.inc({ code });
+  await job.update({ ...job.data, status: 'failed', sesErrorCode: code });
+  logger.error(`Email dropped — non-retryable SES error`, { jobId: job.id, code });
+
+  droppedSinceLastAlert++;
+  if (droppedSinceLastAlert >= DROPPED_RATE_ALERT_THRESHOLD) {
+    logger.error('ALERT: dropped-email rate threshold exceeded', {
+      droppedSinceLastAlert,
+      threshold: DROPPED_RATE_ALERT_THRESHOLD,
+    });
+    droppedSinceLastAlert = 0;
+  }
+}
 
 /**
  * Email job processor
@@ -50,6 +103,10 @@ export async function processEmailJob(job: Job<EmailJobData>) {
       metadata,
     };
   } catch (error: any) {
+    if (isNonRetryableSesError(error)) {
+      await dropEmail(job, error);
+      throw new UnrecoverableError(`Email dropped: ${getSesErrorCode(error)}`);
+    }
     console.error(`[EmailJob] Job ${job.id} failed:`, error.message);
     throw new Error(`Failed to send email: ${error.message}`);
   }
