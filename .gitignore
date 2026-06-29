@@ -87,3 +87,13 @@ tmp/
 temp/
 *.tmp
 *.bak
+
+# Kiro AI agent workspace
+.kiro/
+
+# Debug / profiling
+*.heapsnapshot
+*.cpuprofile
+
+# Lock files (root-level, keep backend/package-lock.json)
+package-lock.json
