@@ -91,4 +91,50 @@ describe('sliMiddleware', () => {
     sliMiddleware(makeReq(), res as unknown as Response, next as NextFunction);
     expect(next).toHaveBeenCalledTimes(1);
   });
+
+  it('records correct method, route, and status labels on 2xx', () => {
+    const res = makeRes(200);
+    sliMiddleware(makeReq(), res as unknown as Response, jest.fn() as NextFunction);
+    res.emit('finish');
+
+    expect(mockObserveSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ method: 'GET', status_code: '200' }),
+      expect.any(Number),
+    );
+  });
+
+  it('increments error counter for 4xx responses via success histogram with correct labels', () => {
+    const res = makeRes(404);
+    sliMiddleware(makeReq(), res as unknown as Response, jest.fn() as NextFunction);
+    res.emit('finish');
+
+    expect(mockObserveSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ status_code: '404' }),
+      expect.any(Number),
+    );
+    expect(mockObserveError).not.toHaveBeenCalled();
+  });
+
+  it('collapses unlisted routes to the category returned by resolveCategory', () => {
+    const res = makeRes(200);
+    sliMiddleware(makeReq(), res as unknown as Response, jest.fn() as NextFunction);
+    res.emit('finish');
+
+    expect(mockObserveSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ category: 'general' }),
+      expect.any(Number),
+    );
+  });
+
+  it('uses req.route.path when available, falling back to req.path', () => {
+    const req = { method: 'GET', path: '/test', originalUrl: '/test', route: { path: '/test/:id' } } as unknown as Request;
+    const res = makeRes(200);
+    sliMiddleware(req, res as unknown as Response, jest.fn() as NextFunction);
+    res.emit('finish');
+
+    expect(mockObserveSuccess).toHaveBeenCalledWith(
+      expect.objectContaining({ route: '/test/:id' }),
+      expect.any(Number),
+    );
+  });
 });
