@@ -5,6 +5,55 @@ import { getRedisConnection } from '../config/runtime';
 
 const logger = createLogger('tiktok-service');
 
+const MAX_RETRIES = 3;
+
+/**
+ * Parse the Retry-After header value.
+ * Accepts either a delay-seconds integer or an HTTP-date string.
+ * Returns the wait duration in milliseconds.
+ */
+function parseRetryAfterMs(header: string | null): number | null {
+  if (!header) return null;
+  const seconds = Number(header);
+  if (Number.isFinite(seconds) && seconds >= 0) return seconds * 1000;
+  // HTTP-date format
+  const date = new Date(header);
+  if (!isNaN(date.getTime())) {
+    const waitMs = date.getTime() - Date.now();
+    return waitMs > 0 ? waitMs : 0;
+  }
+  return null;
+}
+
+/**
+ * Wraps fetch with Retry-After-aware retry logic for 429 responses.
+ * Falls back to exponential backoff when the Retry-After header is absent.
+ */
+async function fetchWithRetry(
+  url: string,
+  init: RequestInit,
+  retries = MAX_RETRIES,
+): Promise<Response> {
+  let attempt = 0;
+  while (true) {
+    const response = await fetch(url, init);
+    if (response.status !== 429 || attempt >= retries) return response;
+
+    const retryAfterMs =
+      parseRetryAfterMs(response.headers.get('Retry-After')) ??
+      Math.min(1000 * 2 ** attempt, 30_000); // exponential backoff fallback
+
+    logger.warn('TikTok API rate limited — backing off before retry', {
+      url,
+      attempt: attempt + 1,
+      retryAfterMs,
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, retryAfterMs));
+    attempt++;
+  }
+}
+
 const UPLOAD_PROGRESS_PREFIX = 'tiktok:upload:progress:';
 const UPLOAD_SESSION_PREFIX = 'tiktok:upload:session:';
 const UPLOAD_PROGRESS_TTL = 86400; // 24 hours
@@ -110,7 +159,7 @@ class TikTokService {
    * Step 2: Exchange authorization code for access + refresh tokens.
    */
   public async exchangeCode(code: string): Promise<TikTokTokens> {
-    const response = await fetch(TIKTOK_TOKEN_URL, {
+    const response = await fetchWithRetry(TIKTOK_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -139,7 +188,7 @@ class TikTokService {
    * Refresh an expired access token using the refresh token.
    */
   public async refreshAccessToken(refreshToken: string): Promise<TikTokTokens> {
-    const response = await fetch(TIKTOK_TOKEN_URL, {
+    const response = await fetchWithRetry(TIKTOK_TOKEN_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       body: new URLSearchParams({
@@ -176,7 +225,7 @@ class TikTokService {
     return circuitBreakerService.execute(
       'tiktok',
       async () => {
-        const response = await fetch(
+        const response = await fetchWithRetry(
           'https://open.tiktokapis.com/v2/user/info/?fields=open_id,union_id,avatar_url,display_name,bio_description,profile_deep_link,is_verified,follower_count,following_count,likes_count,video_count',
           {
             headers: {
@@ -247,7 +296,7 @@ class TikTokService {
           },
         };
 
-        const response = await fetch(TIKTOK_VIDEO_INIT_URL, {
+        const response = await fetchWithRetry(TIKTOK_VIDEO_INIT_URL, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -442,7 +491,7 @@ class TikTokService {
           },
         };
 
-        const response = await fetch(TIKTOK_VIDEO_INIT_URL, {
+        const response = await fetchWithRetry(TIKTOK_VIDEO_INIT_URL, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
@@ -479,7 +528,7 @@ class TikTokService {
     return circuitBreakerService.execute(
       'tiktok',
       async () => {
-        const response = await fetch(TIKTOK_VIDEO_STATUS_URL, {
+        const response = await fetchWithRetry(TIKTOK_VIDEO_STATUS_URL, {
           method: 'POST',
           headers: {
             Authorization: `Bearer ${accessToken}`,
