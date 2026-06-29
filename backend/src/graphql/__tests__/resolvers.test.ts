@@ -12,7 +12,13 @@ jest.mock('../../services/AuthBlacklistService', () => ({
 jest.mock('../../lib/prisma', () => ({
   prisma: {
     user: { findUnique: jest.fn() },
-    post: { findMany: jest.fn(), findUnique: jest.fn(), create: jest.fn(), update: jest.fn(), delete: jest.fn() },
+    post: {
+      findMany: jest.fn(),
+      findUnique: jest.fn(),
+      create: jest.fn(),
+      update: jest.fn(),
+      delete: jest.fn(),
+    },
   },
 }));
 
@@ -55,5 +61,38 @@ describe('GraphQL requireAuth – blacklist enforcement', () => {
     const result = await resolvers.Query.me({}, {}, ctx);
     expect(result).toEqual({ id: 'user-2' });
     expect(mockIsBlacklisted).not.toHaveBeenCalled();
+  });
+});
+
+describe('Subscription.orgUpdate – org membership validation', () => {
+  afterEach(() => jest.clearAllMocks());
+
+  it('throws FORBIDDEN when the subscriber belongs to a different org', async () => {
+    mockIsBlacklisted.mockResolvedValue(false);
+    const { prisma } = require('../../lib/prisma');
+    prisma.user.findUnique.mockResolvedValue({ organizationId: 'org-a' });
+
+    const ctx = { userId: 'user-1', tokenKey: 'jti-abc' };
+    await expect(
+      resolvers.Subscription.orgUpdate.subscribe({}, { orgId: 'org-b' }, ctx),
+    ).rejects.toThrow('FORBIDDEN');
+  });
+
+  it('resolves the iterator when the subscriber belongs to the requested org', async () => {
+    mockIsBlacklisted.mockResolvedValue(false);
+    const { prisma } = require('../../lib/prisma');
+    prisma.user.findUnique.mockResolvedValue({ organizationId: 'org-a' });
+
+    const ctx = { userId: 'user-1', tokenKey: 'jti-abc' };
+    // Should not throw — returns an async iterator
+    const result = await resolvers.Subscription.orgUpdate.subscribe({}, { orgId: 'org-a' }, ctx);
+    expect(result).toBeDefined();
+  });
+
+  it('throws UNAUTHENTICATED when there is no userId in context', async () => {
+    const ctx = {};
+    await expect(
+      resolvers.Subscription.orgUpdate.subscribe({}, { orgId: 'org-a' }, ctx),
+    ).rejects.toThrow('UNAUTHENTICATED');
   });
 });

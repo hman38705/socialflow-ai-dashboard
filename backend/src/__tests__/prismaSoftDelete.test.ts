@@ -153,3 +153,61 @@ describe('softDeleteMiddleware', () => {
     });
   });
 });
+
+describe('softDeleteMiddleware – metrics and logging (issue #1129)', () => {
+  let counterInc: jest.Mock;
+  let loggerDebug: jest.Mock;
+
+  beforeEach(() => {
+    // Mock prom-client Counter and logger to capture calls
+    counterInc = jest.fn();
+    loggerDebug = jest.fn();
+
+    jest.doMock('../lib/metrics', () => ({
+      register: { registerMetric: jest.fn() },
+    }));
+
+    jest.doMock('../lib/logger', () => ({
+      createLogger: () => ({
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: loggerDebug,
+      }),
+    }));
+
+    jest.doMock('prom-client', () => ({
+      Counter: jest.fn().mockImplementation(() => ({
+        inc: counterInc,
+        labels: jest.fn().mockReturnThis(),
+      })),
+    }));
+  });
+
+  afterEach(() => jest.resetModules());
+
+  it('increments prisma_soft_delete_total counter on delete interception', async () => {
+    // Use the already-imported middleware; counter is module-level so we
+    // verify side effects through the exported counter directly.
+    const { prismaSoftDeleteTotal } = await import('../middleware/prismaSoftDelete');
+    const spy = jest
+      .spyOn(prismaSoftDeleteTotal, 'labels')
+      .mockReturnValue({ inc: counterInc } as any);
+
+    const next = jest.fn().mockResolvedValue({ id: '42' });
+    await softDeleteMiddleware(
+      {
+        model: 'User',
+        action: 'delete',
+        args: { where: { id: '42' } },
+        dataPath: [],
+        runInTransaction: false,
+      },
+      next,
+    );
+
+    expect(spy).toHaveBeenCalledWith('User');
+    expect(counterInc).toHaveBeenCalledTimes(1);
+    spy.mockRestore();
+  });
+});

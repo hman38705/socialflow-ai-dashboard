@@ -9,6 +9,19 @@ type MiddlewareParams = {
 
 type Next = (params: MiddlewareParams) => Promise<any>;
 
+import { Counter } from 'prom-client';
+import { register } from '../lib/metrics';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('prisma-soft-delete');
+
+export const prismaSoftDeleteTotal = new Counter({
+  name: 'prisma_soft_delete_total',
+  help: 'Total number of Prisma delete operations rewritten as soft-deletes',
+  labelNames: ['model'] as const,
+  registers: [register],
+});
+
 // Models that support soft delete (have a deletedAt field)
 const SOFT_DELETE_MODELS = new Set(['User', 'Listing', 'Post']);
 
@@ -23,15 +36,22 @@ export const softDeleteMiddleware = async (params: MiddlewareParams, next: Next)
     params.action = 'update';
     params.args.data = { deletedAt: new Date() };
     const result = await next(params);
-    
+
+    // Emit metric and structured log for observability
+    prismaSoftDeleteTotal.labels(params.model).inc();
+    logger.debug('Soft-delete intercepted', { model: params.model, id: params.args.where?.id });
+
     // Remove from search index if deleting a Post
     if (params.model === 'Post' && params.args.where?.id) {
       const { deletePost } = await import('../services/SearchService');
       deletePost(params.args.where.id).catch((err) => {
-        console.error('Failed to remove post from search index', { id: params.args.where.id, error: err });
+        console.error('Failed to remove post from search index', {
+          id: params.args.where.id,
+          error: err,
+        });
       });
     }
-    
+
     return result;
   }
 
@@ -57,7 +77,10 @@ export const softDeleteMiddleware = async (params: MiddlewareParams, next: Next)
         .index('posts')
         .deleteDocuments(idsToRemove)
         .catch((err: Error) => {
-          console.error('Failed to remove posts from search index', { count: idsToRemove.length, error: err });
+          console.error('Failed to remove posts from search index', {
+            count: idsToRemove.length,
+            error: err,
+          });
         });
     }
 
