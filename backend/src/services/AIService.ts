@@ -7,6 +7,7 @@ import { eventBus } from '../lib/eventBus';
 import { createLogger } from '../lib/logger';
 import { billingService } from './BillingService';
 import { TYPES } from '../config/types';
+import { BadRequestError } from '../lib/errors';
 
 export interface GenerateContentResult {
   text: string;
@@ -16,6 +17,9 @@ export interface GenerateContentResult {
 const logger = createLogger('ai-service');
 
 const tracer = trace.getTracer('socialflow-ai');
+
+/** Conservative character-count proxy for Gemini's input token limit (~1M tokens × ~4 chars/token). */
+const MAX_PROMPT_LENGTH = 4_000_000;
 
 /**
  * AIService - Wrapper for Google Gemini AI with circuit breaker protection
@@ -69,6 +73,13 @@ class AIService {
   ): Promise<GenerateContentResult> {
     if (!this.model) {
       throw new Error('Gemini AI not initialized. Please configure GEMINI_API_KEY.');
+    }
+
+    if (prompt.length > MAX_PROMPT_LENGTH) {
+      throw new BadRequestError(
+        `Prompt exceeds maximum allowed length of ${MAX_PROMPT_LENGTH} characters`,
+        'PROMPT_TOO_LARGE',
+      );
     }
 
     const jobId = `ai-${Date.now()}`;

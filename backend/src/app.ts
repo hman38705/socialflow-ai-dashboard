@@ -16,6 +16,7 @@ import { swaggerSpec } from './config/swagger';
 import { createApolloServer } from './graphql';
 import { buildContext } from './graphql/context';
 import { authenticate } from './middleware/authenticate';
+import { config } from './config/config';
 
 // Initialise rate limiters (resolves Redis store in production)
 export const rateLimitersReady = initRateLimiters();
@@ -80,7 +81,6 @@ app.use('/api', (req: Request, res: Response, next: NextFunction) => {
 
 // Bare /health for load-balancer probes (no versioning needed)
 app.get('/health', (_req: Request, res: Response) => {
-  const { config } = require('./config/config');
   const ttsAvailable = !!(config.ELEVENLABS_API_KEY || config.GOOGLE_TTS_API_KEY);
   res.status(200).json({
     status: 'ok',

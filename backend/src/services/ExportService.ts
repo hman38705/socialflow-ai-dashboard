@@ -43,10 +43,12 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, recordedAt: { gte: startDate, lte: endDate } };
+    const total = await replicaClient.analyticsEntry.count({ where });
     const header = 'id,organizationId,platform,metric,value,recordedAt\n';
     const stream = makeStream(res, {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="analytics.csv"',
+      'X-Total-Rows': String(total),
     });
     stream.push(header);
     await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
@@ -62,9 +64,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, recordedAt: { gte: startDate, lte: endDate } };
+    const total = await replicaClient.analyticsEntry.count({ where });
     const stream = makeStream(res, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="analytics.jsonl"',
+      'X-Total-Rows': String(total),
     });
     await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',
@@ -79,10 +83,12 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, createdAt: { gte: startDate, lte: endDate } };
+    const total = await replicaClient.post.count({ where });
     const header = 'id,organizationId,content,platform,scheduledAt,createdAt\n';
     const stream = makeStream(res, {
       'Content-Type': 'text/csv; charset=utf-8',
       'Content-Disposition': 'attachment; filename="posts.csv"',
+      'X-Total-Rows': String(total),
     });
     stream.push(header);
     await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) => {
@@ -98,9 +104,11 @@ export const ExportService = {
   ): Promise<void> => {
     // Read-only operation — use read replica
     const where = { organizationId, createdAt: { gte: startDate, lte: endDate } };
+    const total = await replicaClient.post.count({ where });
     const stream = makeStream(res, {
       'Content-Type': 'application/x-ndjson; charset=utf-8',
       'Content-Disposition': 'attachment; filename="posts.jsonl"',
+      'X-Total-Rows': String(total),
     });
     await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) =>
       JSON.stringify(row) + '\n',

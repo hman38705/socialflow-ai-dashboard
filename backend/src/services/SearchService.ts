@@ -53,6 +53,11 @@ export async function deletePost(postId: string): Promise<void> {
   }
 }
 
+/** Escape a value for use inside a Meilisearch double-quoted filter string. */
+function escapeMeiliFilterValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
 /** Full-text search across posts. organizationId is required to scope results to one org. */
 export async function searchPosts(
   query: string,
@@ -73,8 +78,8 @@ export async function searchPosts(
     throw new Error('Invalid platform value');
   }
 
-  const filter: string[] = [`organizationId = "${opts.organizationId}"`];
-  if (opts.platform) filter.push(`platform = "${opts.platform}"`);
+  const filter: string[] = [`organizationId = "${escapeMeiliFilterValue(opts.organizationId)}"`];
+  if (opts.platform) filter.push(`platform = "${escapeMeiliFilterValue(opts.platform)}"`);
 
   return getMeiliClient()
     .index(POSTS_INDEX)
