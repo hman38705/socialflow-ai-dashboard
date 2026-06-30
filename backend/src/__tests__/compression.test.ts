@@ -79,3 +79,39 @@ describe('shouldCompress – Content-Encoding guard', () => {
     expect(result).toBe(false);
   });
 });
+
+describe('shouldCompress – content-type allowlist', () => {
+  it('compresses application/json responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'application/json' }))).toBe(true);
+  });
+
+  it('compresses text/html responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'text/html' }))).toBe(true);
+  });
+
+  it('does not compress image/png responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'image/png' }))).toBe(false);
+  });
+
+  it('does not compress image/jpeg responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'image/jpeg' }))).toBe(false);
+  });
+
+  it('does not compress video/mp4 responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'video/mp4' }))).toBe(false);
+  });
+
+  it('does not compress audio/mpeg responses', () => {
+    expect(capturedFilter!(makeReq(), makeRes({ 'content-type': 'audio/mpeg' }))).toBe(false);
+  });
+});
+
+describe('shouldCompress – threshold enforcement', () => {
+  it('compressionMiddleware is configured with the threshold option', () => {
+    // The compression mock captures options; verify threshold is set
+    const compressionMock = require('compression') as jest.Mock;
+    const callArgs = compressionMock.mock.calls[0]?.[0];
+    expect(callArgs).toHaveProperty('threshold');
+    expect(typeof callArgs.threshold).toBe('number');
+  });
+});

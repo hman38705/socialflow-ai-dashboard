@@ -187,3 +187,81 @@ describe('processCohortJob — ordering guarantee on Monday', () => {
     expect(callOrder).toEqual(['exists', 'compute']);
   });
 });
+
+// ── processCohortJob — cohort membership evaluation ───────────────────────────
+
+describe('processCohortJob — cohort membership evaluation', () => {
+  it('calls computeCohorts with the correct organizationId', async () => {
+    const job = makeJob('e1', { organizationId: 'org-abc', triggeredBy: 'manual' });
+    await processCohortJob(job, TUESDAY);
+    expect(cohortService.computeCohorts).toHaveBeenCalledWith('org-abc');
+  });
+
+  it('calls computeCohorts with undefined for a global recompute', async () => {
+    const job = makeJob('e2', { triggeredBy: 'manual' });
+    await processCohortJob(job, TUESDAY);
+    expect(cohortService.computeCohorts).toHaveBeenCalledWith(undefined);
+  });
+
+  it('returns a summary containing segment counts from the result', async () => {
+    const job = makeJob('e3', { organizationId: 'org-1', triggeredBy: 'manual' });
+    const summary = await processCohortJob(job, TUESDAY) as any;
+    expect(summary.totalUsers).toBe(mockResult.totalUsers);
+    expect(summary.segments).toEqual([{ cohort: 'power', count: 10 }]);
+  });
+
+  it('includes the organizationId in the returned summary', async () => {
+    const job = makeJob('e4', { organizationId: 'org-42', triggeredBy: 'manual' });
+    const summary = await processCohortJob(job, TUESDAY) as any;
+    expect(summary.organizationId).toBe('org-42');
+  });
+});
+
+// ── processCohortJob — incremental update (cache invalidation) ────────────────
+
+describe('processCohortJob — incremental update', () => {
+  it('invalidates the cache before computing cohorts', async () => {
+    const callOrder: string[] = [];
+    (cohortService.invalidateCache as jest.Mock).mockImplementationOnce(() => callOrder.push('invalidate'));
+    (cohortService.computeCohorts as jest.Mock).mockImplementationOnce(async () => {
+      callOrder.push('compute');
+      return mockResult;
+    });
+    const job = makeJob('i1', { organizationId: 'org-1', triggeredBy: 'manual' });
+    await processCohortJob(job, TUESDAY);
+    expect(callOrder).toEqual(['invalidate', 'compute']);
+  });
+
+  it('invalidates cache with the correct organizationId', async () => {
+    const job = makeJob('i2', { organizationId: 'org-xyz', triggeredBy: 'manual' });
+    await processCohortJob(job, TUESDAY);
+    expect(cohortService.invalidateCache).toHaveBeenCalledWith('org-xyz');
+  });
+});
+
+// ── processCohortJob — DLQ on permanent failure ───────────────────────────────
+
+describe('processCohortJob — DLQ on permanent failure', () => {
+  it('propagates the error so BullMQ can route to DLQ after retries', async () => {
+    (cohortService.computeCohorts as jest.Mock).mockRejectedValueOnce(new Error('DB unavailable'));
+    const job = makeJob('q1', { organizationId: 'org-1', triggeredBy: 'manual' });
+    await expect(processCohortJob(job, TUESDAY)).rejects.toThrow('DB unavailable');
+  });
+
+  it('does not write the daily-complete key when computeCohorts fails', async () => {
+    (cohortService.computeCohorts as jest.Mock).mockRejectedValueOnce(new Error('fail'));
+    const job = makeJob('q2', { organizationId: 'org-1', triggeredBy: 'daily' });
+    await expect(processCohortJob(job, TUESDAY)).rejects.toThrow();
+    expect(mockSet).not.toHaveBeenCalled();
+  });
+
+  it('does not block other jobs — each job throw is independent', async () => {
+    (cohortService.computeCohorts as jest.Mock)
+      .mockRejectedValueOnce(new Error('fail'))
+      .mockResolvedValueOnce(mockResult);
+    const job1 = makeJob('q3', { triggeredBy: 'manual' });
+    const job2 = makeJob('q4', { triggeredBy: 'manual' });
+    await expect(processCohortJob(job1, TUESDAY)).rejects.toThrow();
+    await expect(processCohortJob(job2, TUESDAY)).resolves.toBeDefined();
+  });
+});
