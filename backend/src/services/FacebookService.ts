@@ -59,6 +59,23 @@ const API_BASE = `https://graph.facebook.com/${FB_API_VERSION}`;
 const _OAUTH_TOKEN_URL = `https://graph.facebook.com/${FB_API_VERSION}/oauth/access_token`;
 const FACEBOOK_AUTH_URL = `https://www.facebook.com/${FB_API_VERSION}/dialog/oauth`;
 
+/** How long before `expiresAt` a token is proactively refreshed. Default: 7 days. */
+const REFRESH_WINDOW_MS = Number(
+  process.env.FACEBOOK_TOKEN_REFRESH_WINDOW_MS ?? 7 * 24 * 60 * 60 * 1000,
+);
+
+/**
+ * Thrown when a Facebook token is past (or near) expiry and the proactive
+ * refresh attempt itself fails. Callers should treat this as a signal to
+ * prompt the user to re-authenticate, rather than a generic API failure.
+ */
+export class AuthRefreshError extends Error {
+  constructor(message: string, public readonly cause?: unknown) {
+    super(message);
+    this.name = 'AuthRefreshError';
+  }
+}
+
 logger.info(`FacebookService using Graph API version ${FB_API_VERSION}`);
 
 class FacebookService {
@@ -142,6 +159,25 @@ class FacebookService {
       accessToken: data.access_token,
       expiresAt: Date.now() + (data.expires_in || 5184000) * 1000, // 60 days default
     };
+  }
+
+  /**
+   * Proactively refresh a long-lived token if it is within REFRESH_WINDOW_MS
+   * of expiring. Call this before any Graph API call that uses a stored
+   * user token. Throws AuthRefreshError (instead of a generic Graph API
+   * error) if the refresh attempt itself fails, so callers can prompt the
+   * user to re-authenticate.
+   */
+  public async ensureFreshToken(tokens: FacebookTokens): Promise<FacebookTokens> {
+    if (tokens.expiresAt - Date.now() >= REFRESH_WINDOW_MS) {
+      return tokens;
+    }
+    try {
+      const refreshed = await this.getLongLivedUserToken(tokens.accessToken);
+      return { ...tokens, accessToken: refreshed.accessToken, expiresAt: refreshed.expiresAt };
+    } catch (err) {
+      throw new AuthRefreshError('Failed to refresh Facebook access token', err);
+    }
   }
 
   /**
@@ -304,17 +340,24 @@ class FacebookService {
   }
 
   /**
-   * Get page access token with user token (for immediate posting)
+   * Get page access token with user token (for immediate posting).
+   * Pass the full FacebookTokens (instead of a bare string) to enable
+   * proactive refresh of a soon-to-expire token before the Graph API call.
    */
   public async postToPageWithUserToken(
-    userAccessToken: string,
+    userAccessToken: string | FacebookTokens,
     request: FacebookPostRequest,
   ): Promise<FacebookPagePost> {
+    const accessToken =
+      typeof userAccessToken === 'string'
+        ? userAccessToken
+        : (await this.ensureFreshToken(userAccessToken)).accessToken;
+
     return circuitBreakerService.execute(
       'facebook',
       async () => {
         // Get the page access token first
-        const pageAccessToken = await this.getPageAccessToken(userAccessToken, request.pageId);
+        const pageAccessToken = await this.getPageAccessToken(accessToken, request.pageId);
 
         const params = new URLSearchParams({
           message: request.message,

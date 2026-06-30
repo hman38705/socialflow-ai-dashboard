@@ -71,9 +71,24 @@ describe('verifySignature', () => {
     const { res, status, json } = buildRes();
     await middleware(req, res, next);
     expect(status).toHaveBeenCalledWith(401);
-    expect(json).toHaveBeenCalledWith(
-      expect.objectContaining({ code: 'MISSING_SIGNATURE_HEADERS' }),
-    );
+    expect(json).toHaveBeenCalledWith({ error: 'Missing timestamp' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('rejects a missing timestamp before computing the HMAC, even with a stale replayed signature', async () => {
+    // A signature computed for a timestamp far in the past must still be rejected
+    // for the *missing timestamp* reason, never reaching HMAC comparison.
+    const staleTs = makeTimestamp(-365 * 24 * 60 * 60 * 1000);
+    const body = '{"event":"test"}';
+    const sig = makeSignature(staleTs, body);
+    const req = buildReq({
+      headers: { 'x-signature': sig },
+      rawBody: Buffer.from(body),
+    } as any);
+    const { res, status, json } = buildRes();
+    await middleware(req, res, next);
+    expect(status).toHaveBeenCalledWith(401);
+    expect(json).toHaveBeenCalledWith({ error: 'Missing timestamp' });
     expect(next).not.toHaveBeenCalled();
   });
 

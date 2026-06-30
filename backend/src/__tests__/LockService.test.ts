@@ -103,4 +103,30 @@ describe('LockService.withLock – TTL extension', () => {
 
     expect(mockUnlock).toHaveBeenCalledTimes(1);
   });
+
+  it('aborts the operation and rejects when a TTL extension fails', async () => {
+    mockExtend.mockImplementation(() => Promise.reject(new Error('redis down')));
+
+    const LockService = getLockService();
+    const duration = 1000;
+
+    let signalAborted = false;
+    const opPromise = LockService.withLock(
+      'abort-key',
+      (signal) =>
+        new Promise((_, reject) => {
+          signal.addEventListener('abort', () => {
+            signalAborted = true;
+            reject(new Error('operation aborted'));
+          });
+        }),
+      { duration },
+    );
+
+    await jest.advanceTimersByTimeAsync(duration / 2);
+
+    await expect(opPromise).rejects.toThrow();
+    expect(signalAborted).toBe(true);
+    expect(mockUnlock).toHaveBeenCalledTimes(1);
+  });
 });
