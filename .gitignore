@@ -32,18 +32,27 @@ test-accounts.json
 coverage
 .nyc_output
 *.lcov
+coverage/
 
 # Test results
-test-results
+test-results/
 junit.xml
+test-report.xml
+*.junit.xml
 
-# Test snapshots
+# Test snapshots — auto-generated, not hand-authored
 **/__snapshots__/
+*.snap
+
+# Jest cache
+.jest-cache/
+jest_cache/
 
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
 !.vscode/settings.json
+.idea/
 .idea
 .DS_Store
 *.suo
@@ -52,6 +61,7 @@ junit.xml
 *.sln
 *.sw?
 Thumbs.db
+*.orig
 
 # Project Tracking
 tasks.md
@@ -88,3 +98,22 @@ tmp/
 temp/
 *.tmp
 *.bak
+
+# Debug output
+*.heapsnapshot
+*.cpuprofile
+
+# Generated OpenAPI / docs
+backend/openapi.generated.json
+
+# ESLint cache
+.eslintcache
+
+# Parcel cache
+.parcel-cache/
+
+# Next.js / Vite
+.next/
+.svelte-kit/
+.vercel/
+.netlify/

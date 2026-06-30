@@ -3,3 +3,46 @@ node_modules
 .env
 
 /src/generated/prisma
+
+# Build output
+dist/
+*.tsbuildinfo
+
+# Coverage reports
+coverage/
+.nyc_output/
+*.lcov
+
+# Test results
+test-results/
+junit.xml
+test-report.xml
+*.junit.xml
+
+# Test snapshots — auto-generated, do not commit
+**/__snapshots__/
+*.snap
+
+# Jest cache
+.jest-cache/
+jest_cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.bak
+
+# Logs
+*.log
+logs/
+
+# OS artefacts
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor
+.idea/
+*.orig
+.eslintcache
