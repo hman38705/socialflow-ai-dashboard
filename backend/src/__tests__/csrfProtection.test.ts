@@ -38,11 +38,12 @@ function makeReq(overrides: Partial<Request> = {}): Request {
   } as unknown as Request;
 }
 
-function makeRes(): { res: Response; status: jest.Mock; json: jest.Mock } {
+function makeRes(): { res: Response; status: jest.Mock; json: jest.Mock; cookie: jest.Mock } {
   const json = jest.fn();
   const status = jest.fn().mockReturnValue({ json });
-  const res = { status, json } as unknown as Response;
-  return { res, status, json };
+  const cookie = jest.fn();
+  const res = { status, json, cookie } as unknown as Response;
+  return { res, status, json, cookie };
 }
 
 // ── Unit tests for the middleware function ────────────────────────────────────
@@ -280,6 +281,92 @@ describe('csrfProtection middleware', () => {
       expect(next).not.toHaveBeenCalled();
       expect(status).toHaveBeenCalledWith(403);
     });
+  });
+});
+
+// ── Session-bound CSRF token (double-submit) — #1126 ──────────────────────────
+// A CSRF token must be derived from the session that minted it. A token
+// copied into a different session (e.g. shared browser profile, token leak)
+// must be rejected even though the origin check alone would pass it.
+
+describe('session-bound CSRF token', () => {
+  beforeEach(() => {
+    process.env.NODE_ENV = 'test';
+  });
+
+  function cookieValue(cookieMock: jest.Mock, name: string): string {
+    const call = cookieMock.mock.calls.find((args) => args[0] === name);
+    if (!call) throw new Error(`cookie '${name}' was never set`);
+    return call[1] as string;
+  }
+
+  it('establishes a session + token pair on first contact', () => {
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({ headers: { origin: 'http://localhost:3000' } });
+    const { res, cookie } = makeRes();
+
+    csrfProtection(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+    expect(cookieValue(cookie, 'csrf_sid')).toBeTruthy();
+    expect(cookieValue(cookie, 'csrf_token')).toBeTruthy();
+  });
+
+  it('allows a request that replays its own session + token pair', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookieValue(cookie1, 'csrf_sid');
+    const token = cookieValue(cookie1, 'csrf_token');
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const second = makeReq({
+      headers: { origin: 'http://localhost:3000', cookie: `csrf_sid=${sid}; csrf_token=${token}` },
+    });
+    const { res: res2 } = makeRes();
+
+    csrfProtection(second, res2, next2);
+
+    expect(next2).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects with 403 when a token is replayed under a different session', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+    const stolenToken = cookieValue(cookie1, 'csrf_token');
+
+    // A different session (different csrf_sid) presents the stolen token.
+    const next2 = jest.fn() as unknown as NextFunction;
+    const attacker = makeReq({
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=attacker-session-id; csrf_token=${stolenToken}`,
+      },
+    });
+    const { res: res2, status, json } = makeRes();
+
+    csrfProtection(attacker, res2, next2);
+
+    expect(next2).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith({ message: 'CSRF check failed: token not bound to session' });
+  });
+
+  it('rejects a token cookie presented without its session cookie', () => {
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({
+      headers: { origin: 'http://localhost:3000', cookie: 'csrf_token=some-leaked-token' },
+    });
+    const { res, status } = makeRes();
+
+    csrfProtection(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(403);
   });
 });
 
