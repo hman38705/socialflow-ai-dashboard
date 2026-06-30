@@ -28,9 +28,14 @@ export async function getTTSJob(req: AuthRequest, res: Response, next: NextFunct
   }
 }
 
-export async function listTTSJobs(_req: AuthRequest, res: Response, next: NextFunction) {
+export async function listTTSJobs(req: AuthRequest, res: Response, next: NextFunction) {
   try {
-    res.json(await ttsService.getAllJobs());
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ message: 'Unauthorized' });
+      return;
+    }
+    res.json(await ttsService.getAllJobs(userId));
   } catch (err) {
     next(err);
   }

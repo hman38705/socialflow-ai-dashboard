@@ -135,7 +135,9 @@ export class BillingService {
   }
 
   /**
-   * Atomically deduct credits for an action inside a per-user lock.
+   * Atomically deduct credits for an action using a compare-and-swap transaction.
+   * The UPDATE only proceeds when creditsRemaining >= cost at commit time, preventing
+   * concurrent requests from overdrafting the balance.
    * Throws if the subscription is missing, inactive, or has insufficient credits.
    * Returns updated balance.
    */
@@ -154,16 +156,29 @@ export class BillingService {
     }
 
     const newBalance = sub.creditsRemaining - cost;
-    await prisma.subscription.update({ where: { userId }, data: { creditsRemaining: newBalance } });
-    await prisma.creditLog.create({
-      data: { userId, action, delta: -cost, balanceAfter: newBalance },
-    });
 
+    const [updated, log] = await prisma.$transaction([
+      prisma.subscription.updateMany({
+        where: { userId, creditsRemaining: { gte: cost } },
+        data: { creditsRemaining: { decrement: cost } },
+      }),
+      prisma.creditLog.create({
+        data: { userId, action, delta: -cost, balanceAfter: newBalance },
+      }),
+    ]);
+
+    if (updated.count === 0) {
+      throw new Error('Insufficient credits (concurrent request exhausted balance)');
+    }
+
+    void log;
     return newBalance;
   }
 
   /**
-   * Atomically deduct credits proportional to actual token usage (1 credit per token).
+   * Atomically deduct credits proportional to actual token usage using a
+   * compare-and-swap transaction. The UPDATE only proceeds when
+   * creditsRemaining >= tokens at commit time, preventing overdraft.
    * Throws if the user has insufficient credits.
    * Returns updated balance.
    */
@@ -181,11 +196,22 @@ export class BillingService {
     }
 
     const newBalance = sub.creditsRemaining - tokens;
-    await prisma.subscription.update({ where: { userId }, data: { creditsRemaining: newBalance } });
-    await prisma.creditLog.create({
-      data: { userId, action: 'ai:generate', delta: -tokens, balanceAfter: newBalance },
-    });
 
+    const [updated, log] = await prisma.$transaction([
+      prisma.subscription.updateMany({
+        where: { userId, creditsRemaining: { gte: tokens } },
+        data: { creditsRemaining: { decrement: tokens } },
+      }),
+      prisma.creditLog.create({
+        data: { userId, action: 'ai:generate', delta: -tokens, balanceAfter: newBalance },
+      }),
+    ]);
+
+    if (updated.count === 0) {
+      throw new Error('Insufficient credits (concurrent request exhausted balance)');
+    }
+
+    void log;
     return newBalance;
   }
 

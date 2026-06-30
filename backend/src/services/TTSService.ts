@@ -52,8 +52,11 @@ class TTSService {
     return row ? rowToJob(row) : undefined;
   }
 
-  async getAllJobs(): Promise<TTSJob[]> {
-    const rows = await prisma.tTSJob.findMany({ orderBy: { createdAt: 'desc' } });
+  async getAllJobs(userId: string): Promise<TTSJob[]> {
+    const rows = await prisma.tTSJob.findMany({
+      where: { userId },
+      orderBy: { createdAt: 'desc' },
+    });
     return rows.map(rowToJob);
   }
 
