@@ -16,6 +16,24 @@ import { getRedisConnection } from '../config/runtime';
 
 const logger = createLogger('VideoService');
 
+export class UnsupportedFormatError extends Error {
+  constructor(public readonly ext: string) {
+    super(`Unsupported input format: .${ext}`);
+    this.name = 'UnsupportedFormatError';
+  }
+}
+
+const SUPPORTED_INPUT_EXTENSIONS = new Set([
+  'mp4', 'mov', 'avi', 'mkv', 'webm', 'flv', 'wmv', 'm4v', 'ts', 'mts',
+]);
+
+function assertSupportedFormat(inputPath: string): void {
+  const ext = path.extname(inputPath).replace(/^\./, '').toLowerCase();
+  if (!SUPPORTED_INPUT_EXTENSIONS.has(ext)) {
+    throw new UnsupportedFormatError(ext);
+  }
+}
+
 const QUEUE_NAME = 'video-transcoding';
 
 interface VideoJobPayload {
@@ -58,11 +76,14 @@ function getQueue(): Queue {
   return _queue;
 }
 
-async function transcodeVideo(
+export async function transcodeVideo(
   job: TranscodingJob,
   quality: VideoQuality,
   format: VideoFormat,
 ): Promise<TranscodedOutput> {
+  // Validate input format before touching ffmpeg (#1097)
+  assertSupportedFormat(job.inputPath);
+
   const outputFilename = `video_${quality.name}.${format.extension}`;
   const outputPath = path.join(job.outputDir, outputFilename);
 
@@ -90,14 +111,17 @@ async function transcodeVideo(
         resolve({ quality: quality.name, format: format.extension, path: outputPath, size: stats.size });
       })
       .on('error', (err: Error) => {
-        fs.rm(outputPath, { force: true }).catch(() => {});
+        // Log cleanup errors rather than swallowing them (#1045)
+        fs.rm(outputPath, { force: true }).catch((cleanupErr: Error) => {
+          logger.warn(`Failed to remove partial output ${outputPath}:`, { error: cleanupErr });
+        });
         reject(err);
       })
       .save(outputPath);
   });
 }
 
-async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
+export async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
   const { jobId, inputPath, outputDir, qualities, formats, userId } = bullJob.data;
 
   const job: TranscodingJob = {
@@ -149,7 +173,10 @@ async function processVideoJob(bullJob: Job<VideoJobPayload>): Promise<void> {
       eventBus.emitJobProgress({ jobId, userId, type: 'video_transcoding', status: 'completed', progress: 100, message: 'Job completed' });
     }
   } finally {
-    await fs.unlink(inputPath).catch(() => {});
+    // Log cleanup errors so they don't silently mask the transcoding result (#1045)
+    await fs.unlink(inputPath).catch((cleanupErr: Error) => {
+      logger.warn(`Failed to delete temp input file ${inputPath}:`, { error: cleanupErr });
+    });
   }
 }
 

@@ -4,6 +4,7 @@ export interface SmsServiceConfig {
   accountSid?: string;
   authToken?: string;
   fromNumber?: string;
+  maxRetries?: number;
 }
 
 export interface SmsResult {
@@ -12,18 +13,37 @@ export interface SmsResult {
   error?: string;
 }
 
+interface TwilioError extends Error {
+  code?: number;
+  status?: number;
+}
+
+// Twilio error codes that must not be retried (#1076)
+const NON_RETRYABLE_CODES = new Set([21211]); // 21211 = invalid phone number
+
+function isNonRetryable(err: unknown): boolean {
+  return typeof (err as TwilioError).code === 'number' &&
+    NON_RETRYABLE_CODES.has((err as TwilioError).code!);
+}
+
+function isTransient(err: unknown): boolean {
+  const status = (err as TwilioError).status;
+  return typeof status === 'number' && status >= 500;
+}
+
 export class SmsService {
   private twilioClient: any;
   private fromNumber: string | undefined;
   private enabled: boolean;
+  private maxRetries: number;
 
   constructor(config: SmsServiceConfig) {
     this.enabled = !!(config.accountSid && config.authToken && config.fromNumber);
     this.fromNumber = config.fromNumber;
+    this.maxRetries = config.maxRetries ?? 3;
 
     if (this.enabled) {
       try {
-        // Lazy load Twilio SDK only if credentials are provided
         const twilio = require('twilio');
         this.twilioClient = twilio(config.accountSid, config.authToken);
         logger.info('[sms-service] Twilio SMS service initialized');
@@ -41,32 +61,35 @@ export class SmsService {
   async send(to: string, message: string): Promise<SmsResult> {
     if (!this.enabled) {
       logger.warn('[sms-service] SMS send attempted but service is disabled');
-      return {
-        success: false,
-        error: 'SMS service not configured',
-      };
+      return { success: false, error: 'SMS service not configured' };
     }
 
-    try {
-      const result = await this.twilioClient.messages.create({
-        body: message,
-        from: this.fromNumber,
-        to,
-      });
-
-      logger.info(`[sms-service] SMS sent successfully to ${to}, messageId: ${result.sid}`);
-      return {
-        success: true,
-        messageId: result.sid,
-      };
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error(`[sms-service] Failed to send SMS to ${to}: ${errorMessage}`);
-      return {
-        success: false,
-        error: errorMessage,
-      };
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
+      try {
+        const result = await this.twilioClient.messages.create({
+          body: message,
+          from: this.fromNumber,
+          to,
+        });
+        logger.info(`[sms-service] SMS sent successfully to ${to}, messageId: ${result.sid}`);
+        return { success: true, messageId: result.sid };
+      } catch (error) {
+        if (isNonRetryable(error)) {
+          // Permanent error — rethrow immediately without retry (#1076)
+          throw error;
+        }
+        lastError = error;
+        if (!isTransient(error) || attempt === this.maxRetries) {
+          break;
+        }
+        logger.warn(`[sms-service] Transient error on attempt ${attempt}, retrying...`);
+      }
     }
+
+    const errorMessage = lastError instanceof Error ? lastError.message : String(lastError);
+    logger.error(`[sms-service] Failed to send SMS to ${to}: ${errorMessage}`);
+    return { success: false, error: errorMessage };
   }
 
   isEnabled(): boolean {
@@ -74,7 +97,6 @@ export class SmsService {
   }
 }
 
-// Singleton instance
 let smsServiceInstance: SmsService | null = null;
 
 export function createSmsService(config: SmsServiceConfig): SmsService {
@@ -82,9 +104,26 @@ export function createSmsService(config: SmsServiceConfig): SmsService {
   return smsServiceInstance;
 }
 
+/**
+ * Factory that reads credentials from TWILIO_* env vars and throws at startup
+ * if any are absent — preventing a silent runtime failure on first send (#1086).
+ */
+export function createSmsServiceFromEnv(): SmsService {
+  const accountSid = process.env.TWILIO_ACCOUNT_SID;
+  const authToken = process.env.TWILIO_AUTH_TOKEN;
+  const fromNumber = process.env.TWILIO_FROM_NUMBER;
+
+  if (!accountSid || !authToken || !fromNumber) {
+    throw new Error(
+      'Missing required Twilio environment variables: TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM_NUMBER',
+    );
+  }
+
+  return createSmsService({ accountSid, authToken, fromNumber });
+}
+
 export function getSmsService(): SmsService {
   if (!smsServiceInstance) {
-    // Create with empty config if not initialized
     smsServiceInstance = new SmsService({});
   }
   return smsServiceInstance;
