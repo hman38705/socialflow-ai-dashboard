@@ -6,9 +6,17 @@ const logger = createLogger('sli');
 
 export function sliMiddleware(req: Request, res: Response, next: NextFunction): void {
   const start = Date.now();
+  let headersSentAt: number | undefined;
+
+  const originalWriteHead = res.writeHead.bind(res);
+  // @ts-expect-error — overloaded signatures; we forward all args unchanged
+  res.writeHead = (...args) => {
+    headersSentAt ??= Date.now();
+    return originalWriteHead(...args);
+  };
 
   res.on('finish', () => {
-    const durationMs = Date.now() - start;
+    const durationMs = (headersSentAt ?? Date.now()) - start;
     const path = req.route?.path ?? req.path;
     const category = resolveCategory(req.originalUrl);
     const labels = {
