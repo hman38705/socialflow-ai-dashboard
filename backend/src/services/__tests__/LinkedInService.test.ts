@@ -1,4 +1,4 @@
-import { ValidationError } from '../../lib/errors';
+import { ValidationError, RateLimitError } from '../../lib/errors';
 
 const mockFetch = jest.fn();
 global.fetch = mockFetch;
@@ -29,12 +29,16 @@ function okResponse(headers: Record<string, string> = {}): Response {
   } as unknown as Response;
 }
 
-function errorResponse(body: object, status = 400): Response {
+function errorResponse(
+  body: object,
+  status = 400,
+  headers: Record<string, string> = {},
+): Response {
   return {
     ok: false,
     status,
     json: () => Promise.resolve(body),
-    headers: { get: () => null },
+    headers: { get: (key: string) => headers[key.toLowerCase()] ?? null },
   } as unknown as Response;
 }
 
@@ -314,6 +318,40 @@ describe('LinkedInService.shareContent — network', () => {
     await expect(
       linkedInService.shareContent('bad-token', BASE_REQUEST),
     ).rejects.toThrow('LinkedIn share failed');
+  });
+
+  it('throws a RateLimitError with the parsed Retry-After (seconds) on a 429', async () => {
+    mockFetch.mockResolvedValueOnce(
+      errorResponse({ message: 'Too Many Requests' }, 429, { 'retry-after': '30' }),
+    );
+
+    const promise = linkedInService.shareContent('my-token', BASE_REQUEST);
+    await expect(promise).rejects.toBeInstanceOf(RateLimitError);
+    await expect(promise.catch((e) => e.retryAfter)).resolves.toBe(30);
+  });
+
+  it('parses an HTTP-date Retry-After header into seconds', async () => {
+    const retryDate = new Date(Date.now() + 60_000).toUTCString();
+    mockFetch.mockResolvedValueOnce(
+      errorResponse({ message: 'Too Many Requests' }, 429, { 'retry-after': retryDate }),
+    );
+
+    const err = await linkedInService
+      .shareContent('my-token', BASE_REQUEST)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitError);
+    expect(err.retryAfter).toBeGreaterThan(0);
+    expect(err.retryAfter).toBeLessThanOrEqual(60);
+  });
+
+  it('throws a RateLimitError with undefined retryAfter when the header is missing', async () => {
+    mockFetch.mockResolvedValueOnce(errorResponse({ message: 'Too Many Requests' }, 429));
+
+    const err = await linkedInService
+      .shareContent('my-token', BASE_REQUEST)
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(RateLimitError);
+    expect(err.retryAfter).toBeUndefined();
   });
 
   it('sends the correct Authorization and protocol headers', async () => {

@@ -1,6 +1,28 @@
 import { circuitBreakerService } from './CircuitBreakerService';
 import { createLogger } from '../lib/logger';
-import { ValidationError } from '../lib/errors';
+import { ValidationError, RateLimitError } from '../lib/errors';
+
+/**
+ * Parse a `Retry-After` header value into seconds.
+ * Per HTTP spec it's either an integer number of seconds, or an HTTP-date.
+ */
+function parseRetryAfterSeconds(header: string | null): number | undefined {
+  if (!header) return undefined;
+  const asSeconds = Number(header);
+  if (!Number.isNaN(asSeconds)) return Math.max(0, asSeconds);
+  const asDate = Date.parse(header);
+  if (!Number.isNaN(asDate)) {
+    return Math.max(0, Math.round((asDate - Date.now()) / 1000));
+  }
+  return undefined;
+}
+
+/** Throw a RateLimitError (with parsed Retry-After) for 429 responses; no-op otherwise. */
+function throwIfRateLimited(response: Response): void {
+  if (response.status !== 429) return;
+  const retryAfter = parseRetryAfterSeconds(response.headers.get('retry-after'));
+  throw new RateLimitError('LinkedIn API rate limit exceeded', retryAfter, 'LINKEDIN_RATE_LIMIT');
+}
 
 const logger = createLogger('linkedin-service');
 
@@ -112,6 +134,7 @@ class LinkedInService {
     });
 
     if (!response.ok) {
+      throwIfRateLimited(response);
       const err = await response.json();
       throw new Error(`LinkedIn token exchange failed: ${JSON.stringify(err)}`);
     }
@@ -138,6 +161,7 @@ class LinkedInService {
         );
 
         if (!response.ok) {
+          throwIfRateLimited(response);
           throw new Error(`LinkedIn profile fetch failed: ${response.status}`);
         }
 
@@ -209,6 +233,7 @@ class LinkedInService {
         });
 
         if (!response.ok) {
+          throwIfRateLimited(response);
           const err = await response.json();
           throw new Error(`LinkedIn share failed: ${JSON.stringify(err)}`);
         }
@@ -310,6 +335,7 @@ class LinkedInService {
         );
 
         if (!response.ok) {
+          throwIfRateLimited(response);
           throw new Error(`LinkedIn stats fetch failed: ${response.status}`);
         }
 
