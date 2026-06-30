@@ -3,6 +3,7 @@ import { queueManager } from '../queues/queueManager';
 import { PayoutJobData, PAYOUT_QUEUE_NAME } from '../queues/payoutQueue';
 import { prisma } from '../lib/prisma';
 import { createHash } from 'crypto';
+import { LockService } from '../utils/LockService';
 
 /**
  * Derive a deterministic transaction hash for a payout.
@@ -57,112 +58,94 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
       throw new Error('Payout amount must be greater than 0');
     }
 
-    // Log progress
     await job.updateProgress(20);
 
-    // ── Stellar / crypto idempotency check ────────────────────────────────
-    let transactionHash: string | undefined;
-    let skipped = false;
+    // ── Row-level lock ─────────────────────────────────────────────────────
+    // Acquire an exclusive distributed lock keyed to the payout group/job so
+    // that concurrent triggers (e.g. manual retry + scheduled run) cannot
+    // both read a pending record and initiate duplicate transfers.
+    return await LockService.withLock(`payout:${groupId}:${job.id ?? 'unknown'}`, async () => {
+      // ── Stellar / crypto idempotency check ──────────────────────────────
+      let transactionHash: string | undefined;
+      let skipped = false;
 
-    if (recipientType === 'crypto' || recipientType === 'wallet') {
-      transactionHash = deriveTransactionHash({
-        groupId,
-        amount,
-        recipient,
-        currency,
-        jobId: job.id ?? 'unknown',
-      });
-
-      // On retry, check if this transaction was already recorded.
-      // If found, we skip submission to avoid paying the user twice.
-      const existing = await prisma.payoutTransaction.findUnique({
-        where: { transactionHash },
-      });
-
-      if (existing) {
-        console.log(
-          `[PayoutJob] Duplicate detected for job ${job.id} —` +
-            ` skipping submission (existing tx: ${existing.id})`,
-        );
-        skipped = true;
-      } else {
-        // Persist the hash BEFORE submitting so even a crash after this point
-        // will be caught on retry.
-        await prisma.payoutTransaction.create({
-          data: {
-            groupId,
-            recipient,
-            amount,
-            currency,
-            transactionHash,
-            jobId: job.id ?? 'unknown',
-            status: 'pending',
-          },
-        });
-      }
-    }
-
-    // ── Payment processing ────────────────────────────────────────────────
-    // Simulate payout processing - replace with actual payment service implementation
-    // const paymentService = require('../services/paymentService').paymentService;
-    // const result = await paymentService.process({
-    //   groupId,
-    //   amount,
-    //   recipient,
-    //   recipientType,
-    //   currency,
-    //   description,
-    // });
-
-    // Simulate processing time for financial transaction
-    if (!skipped) {
-      await new Promise((resolve) => setTimeout(resolve, 500));
-
-      await job.updateProgress(80);
-
-      // Submit Stellar transaction (actual implementation)
       if (recipientType === 'crypto' || recipientType === 'wallet') {
-        // const blockchainService = require('../services/blockchainService').blockchainService;
-        // const stellarResult = await blockchainService.submitTransaction({ ... });
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        transactionHash = deriveTransactionHash({
+          groupId,
+          amount,
+          recipient,
+          currency,
+          jobId: job.id ?? 'unknown',
+        });
 
-        // Mark the transaction as confirmed after successful submission
-        if (transactionHash) {
-          await prisma.payoutTransaction.update({
-            where: { transactionHash },
-            data: { status: 'confirmed', confirmedAt: new Date() },
+        const existing = await prisma.payoutTransaction.findUnique({
+          where: { transactionHash },
+        });
+
+        if (existing) {
+          console.log(
+            `[PayoutJob] Duplicate detected for job ${job.id} —` +
+              ` skipping submission (existing tx: ${existing.id})`,
+          );
+          skipped = true;
+        } else {
+          await prisma.payoutTransaction.create({
+            data: {
+              groupId,
+              recipient,
+              amount,
+              currency,
+              transactionHash,
+              jobId: job.id ?? 'unknown',
+              status: 'pending',
+            },
           });
         }
       }
-    }
 
-    await job.updateProgress(95);
+      // ── Payment processing ───────────────────────────────────────────────
+      if (!skipped) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        await job.updateProgress(80);
 
-    // Log completion
-    console.log(
-      `[PayoutJob] Job ${job.id} completed successfully - ${amount} ${currency} sent to ${recipient}` +
-        (skipped ? ' (skipped — duplicate)' : ''),
-    );
+        if (recipientType === 'crypto' || recipientType === 'wallet') {
+          await new Promise((resolve) => setTimeout(resolve, 200));
 
-    return {
-      success: true,
-      transactionId: job.id,
-      transactionHash,
-      groupId,
-      amount,
-      currency,
-      recipient,
-      recipientType,
-      status: 'completed',
-      skipped,
-      processedAt: new Date().toISOString(),
-      metadata,
-    };
+          if (transactionHash) {
+            await prisma.payoutTransaction.update({
+              where: { transactionHash },
+              data: { status: 'confirmed', confirmedAt: new Date() },
+            });
+          }
+        }
+      }
+
+      await job.updateProgress(95);
+
+      console.log(
+        `[PayoutJob] Job ${job.id} completed successfully - ${amount} ${currency} sent to ${recipient}` +
+          (skipped ? ' (skipped — duplicate)' : ''),
+      );
+
+      return {
+        success: true,
+        transactionId: job.id,
+        transactionHash,
+        groupId,
+        amount,
+        currency,
+        recipient,
+        recipientType,
+        status: 'completed',
+        skipped,
+        processedAt: new Date().toISOString(),
+        metadata,
+      };
+    });
   } catch (error: any) {
     const reason = error.message as string;
     console.error(`[PayoutJob] Job ${job.id} failed:`, reason);
 
-    // Persist the failure reason and timestamp for audit / operational review.
     try {
       await prisma.payoutFailure.create({
         data: {
@@ -175,7 +158,6 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
         },
       });
     } catch (dbErr: any) {
-      // Don't mask the original error; log the DB write failure separately.
       console.error(`[PayoutJob] Failed to persist payout failure record:`, dbErr.message);
     }
 

@@ -1,7 +1,10 @@
 import { GraphQLScalarType, Kind } from 'graphql';
+import { PubSub } from 'graphql-subscriptions';
 import { prisma } from '../lib/prisma';
 import { GraphQLContext } from './context';
 import { AuthBlacklistService } from '../services/AuthBlacklistService';
+
+export const pubsub = new PubSub();
 
 const DateTimeScalar = new GraphQLScalarType({
   name: 'DateTime',
@@ -19,7 +22,7 @@ async function requireAuth(ctx: GraphQLContext): Promise<string> {
   if (!ctx.userId) throw new Error('UNAUTHENTICATED');
 
   // Guard against valid-but-blacklisted tokens that somehow bypassed buildContext
-  if (ctx.tokenKey && await AuthBlacklistService.isBlacklisted(ctx.tokenKey)) {
+  if (ctx.tokenKey && (await AuthBlacklistService.isBlacklisted(ctx.tokenKey))) {
     throw new Error('UNAUTHENTICATED');
   }
 
@@ -80,13 +83,19 @@ export const resolvers = {
   User: {
     email: async (parent: { id: string; email: string }, _: unknown, ctx: GraphQLContext) => {
       const userId = await requireAuth(ctx);
-      const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      const viewer = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
       if (userId !== parent.id && viewer?.role !== 'admin') throw new Error('FORBIDDEN');
       return parent.email;
     },
     role: async (parent: { id: string; role: string }, _: unknown, ctx: GraphQLContext) => {
       const userId = await requireAuth(ctx);
-      const viewer = await prisma.user.findUnique({ where: { id: userId }, select: { role: true } });
+      const viewer = await prisma.user.findUnique({
+        where: { id: userId },
+        select: { role: true },
+      });
       if (userId !== parent.id && viewer?.role !== 'admin') throw new Error('FORBIDDEN');
       return parent.role;
     },
@@ -96,7 +105,11 @@ export const resolvers = {
     /** Create a new post for an organisation. */
     createPost: async (
       _: unknown,
-      { input }: { input: { organizationId: string; content: string; platform: string; scheduledAt?: Date } },
+      {
+        input,
+      }: {
+        input: { organizationId: string; content: string; platform: string; scheduledAt?: Date };
+      },
       ctx: GraphQLContext,
     ) => {
       await requireAuth(ctx);
@@ -106,7 +119,10 @@ export const resolvers = {
     /** Update an existing post. */
     updatePost: async (
       _: unknown,
-      { id, input }: { id: string; input: { content?: string; platform?: string; scheduledAt?: Date } },
+      {
+        id,
+        input,
+      }: { id: string; input: { content?: string; platform?: string; scheduledAt?: Date } },
       ctx: GraphQLContext,
     ) => {
       await requireAuth(ctx);
@@ -118,6 +134,31 @@ export const resolvers = {
       await requireAuth(ctx);
       await prisma.post.delete({ where: { id } });
       return true;
+    },
+  },
+
+  Subscription: {
+    /**
+     * Subscribe to org-level update events.
+     * Topic format: `orgUpdate:<orgId>`.
+     * Validates the subscriber belongs to the requested org before forwarding
+     * events — prevents cross-org event leakage.
+     */
+    orgUpdate: {
+      subscribe: async (_: unknown, { orgId }: { orgId: string }, ctx: GraphQLContext) => {
+        await requireAuth(ctx);
+
+        const user = await prisma.user.findUnique({
+          where: { id: ctx.userId! },
+          select: { organizationId: true },
+        });
+
+        if (!user?.organizationId || user.organizationId !== orgId) {
+          throw new Error('FORBIDDEN');
+        }
+
+        return pubsub.asyncIterator(`orgUpdate:${orgId}`);
+      },
     },
   },
 };
