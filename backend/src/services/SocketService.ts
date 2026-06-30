@@ -111,11 +111,13 @@ export class SocketService {
       // Handle message events dynamically
       socket.on('message', (payload) => {
         logger.info(`Message from ${socket.id}`, { payload });
-        // Relay message or process it
         if (orgId) {
           this.io?.to(`org:${orgId}`).emit('message', { ...payload, from: socket.user });
+        } else if (userId) {
+          // Scope to sender's own user room — never broadcast globally without an org
+          socket.to(`user:${userId}`).emit('message', { ...payload, from: socket.user });
         } else {
-          this.io?.emit('message', { ...payload, from: socket.user });
+          logger.warn(`Message dropped — no orgId or userId for socket ${socket.id}`);
         }
       });
 
@@ -125,7 +127,7 @@ export class SocketService {
           // Broadcast to everyone in the room except the sender
           socket.to(`org:${orgId}`).emit('collaboration:update', payload);
         } else {
-          socket.broadcast.emit('collaboration:update', payload);
+          logger.warn(`collaboration:update dropped — no orgId for socket ${socket.id}`);
         }
       });
 
