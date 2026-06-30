@@ -51,6 +51,9 @@ module.exports = {
         '!**/services/__tests__/CircuitBreakerService.integration.test.ts',
         '!**/__tests__/geminiImageValidation.test.ts',
         '!**/services/__tests__/AIService.circuitBreaker.test.ts',
+        // LockServiceUnit exercises the real LockService implementation and
+        // must run in its own project without the LockService moduleNameMapper stub.
+        '!**/__tests__/LockServiceUnit.test.ts',
       ],
       moduleNameMapper: {
         ...sharedModuleNameMapper,
@@ -127,6 +130,32 @@ module.exports = {
       setupFiles: ['<rootDir>/src/__tests__/unitSetup.ts'],
       transform: { '^.+\\.tsx?$': ['ts-jest', { diagnostics: false }] },
       testTimeout: 15000,
+    },
+    {
+      // Dedicated project for LockService unit tests (issue #1112).
+      // Must NOT include the LockService moduleNameMapper stub so the tests
+      // can load the real implementation via jest.resetModules() + require().
+      displayName: 'lock-service-unit',
+      preset: 'ts-jest',
+      testEnvironment: 'node',
+      roots: ['<rootDir>/src'],
+      testMatch: ['**/__tests__/LockServiceUnit.test.ts'],
+      moduleNameMapper: {
+        ...sharedModuleNameMapper,
+        '^opossum$': '<rootDir>/src/__tests__/__mocks__/opossum.ts',
+        '^.*/lib/prisma$': '<rootDir>/src/__tests__/__mocks__/prisma.ts',
+        '^.*/lib/readReplica$': '<rootDir>/src/__tests__/__mocks__/readReplica.ts',
+        '^.*/lib/logger$': '<rootDir>/src/__tests__/__mocks__/logger.ts',
+        '^.*/CircuitBreakerService$': '<rootDir>/src/__tests__/__mocks__/CircuitBreakerService.ts',
+        '^multer$': '<rootDir>/src/__tests__/__mocks__/multer.ts',
+        '^sharp$': '<rootDir>/src/__tests__/__mocks__/sharp.ts',
+        '^.*/middleware/rateLimit$': '<rootDir>/src/__tests__/__mocks__/rateLimit.ts',
+        // NOTE: '^.*/utils/LockService$' is intentionally omitted so the real
+        // LockService module is loaded when tests call require('../utils/LockService').
+      },
+      setupFiles: ['<rootDir>/src/__tests__/unitSetup.ts'],
+      setupFilesAfterEnv: ['<rootDir>/src/__tests__/otelTeardown.ts'],
+      transform: { '^.+\\.tsx?$': ['ts-jest', { diagnostics: false }] },
     },
   ],
 };
