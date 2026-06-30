@@ -2,6 +2,9 @@ import { Router, Request, Response } from 'express';
 import { authenticate as authMiddleware } from '../middleware/authenticate';
 import { checkPermission } from '../middleware/checkPermission';
 import { translationService } from '../services/TranslationService';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('translation-route');
 
 const router = Router();
 
@@ -86,7 +89,7 @@ router.post('/translate', authMiddleware, checkPermission('posts:create'), async
 
     res.json(result);
   } catch (error) {
-    console.error('Translation error:', error);
+    logger.error('Translation error', { error });
     res.status(500).json({ error: 'Failed to translate content' });
   }
 });
@@ -119,7 +122,7 @@ router.get('/languages', (req: Request, res: Response) => {
     const languages = translationService.getSupportedLanguages();
     res.json({ languages });
   } catch (error) {
-    console.error('Languages error:', error);
+    logger.error('Languages error', { error });
     res.status(500).json({ error: 'Failed to get languages' });
   }
 });
@@ -175,7 +178,7 @@ router.post('/detect', authMiddleware, checkPermission('posts:create'), async (r
           ?.name || result.sourceLanguage,
     });
   } catch (error) {
-    console.error('Detection error:', error);
+    logger.error('Detection error', { error });
     res.status(500).json({ error: 'Failed to detect language' });
   }
 });
@@ -252,7 +255,7 @@ router.post('/batch', authMiddleware, checkPermission('posts:create'), async (re
       duration,
     });
   } catch (error) {
-    console.error('Batch translation error:', error);
+    logger.error('Batch translation error', { error });
     res.status(500).json({ error: 'Failed to translate batch' });
   }
 });
@@ -304,7 +307,7 @@ router.get('/providers', (req: Request, res: Response) => {
 
     res.json({ providers });
   } catch (error) {
-    console.error('Providers error:', error);
+    logger.error('Providers error', { error });
     res.status(500).json({ error: 'Failed to get providers' });
   }
 });
