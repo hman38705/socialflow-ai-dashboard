@@ -3,6 +3,7 @@ import { isIP } from 'net';
 import dns from 'dns/promises';
 import { prisma } from '../lib/prisma';
 import { createLogger } from '../lib/logger';
+import { webhookDispatchFailed } from '../lib/metrics';
 import { WebhookEventType } from '../schemas/webhooks';
 
 const logger = createLogger('WebhookDispatcher');
@@ -121,7 +122,14 @@ export async function dispatchEvent(
         },
       });
       // Fire-and-forget; errors are caught and persisted inside
-      attemptDelivery(delivery.id, sub.url, sub.secret, payload, 1).catch(() => {});
+      attemptDelivery(delivery.id, sub.url, sub.secret, payload, 1).catch((err) => {
+        logger.error('Unexpected error in fire-and-forget delivery', {
+          deliveryId: delivery.id,
+          subscriptionId: sub.id,
+          err,
+        });
+        webhookDispatchFailed.inc({ subscription_id: sub.id });
+      });
     }),
   );
 }
@@ -245,7 +253,14 @@ export async function retryPendingDeliveries(): Promise<void> {
         d.subscription.secret,
         d.payload,
         d.attempts + 1,
-      ).catch(() => {}),
+      ).catch((err) => {
+        logger.error('Unexpected error in fire-and-forget retry delivery', {
+          deliveryId: d.id,
+          subscriptionId: d.subscription.id,
+          err,
+        });
+        webhookDispatchFailed.inc({ subscription_id: d.subscription.id });
+      }),
     ),
   );
 }

@@ -39,9 +39,14 @@ class TTSService {
 
     logger.info(`TTS job created`, { jobId, segments: req.segments.length });
 
-    this.processJob(jobId).catch((err) => {
+    // Fire-and-forget — errors are caught and stored on the job
+    this.processJob(jobId).catch(async (err) => {
       logger.error(`TTS job ${jobId} failed unexpectedly`, { err });
-      this.updateStatus(jobId, 'failed', String(err?.message ?? err));
+      try {
+        await this.updateStatus(jobId, 'failed', String(err?.message ?? err));
+      } catch (statusErr) {
+        logger.error(`TTS job ${jobId} failed to persist failure status`, { statusErr });
+      }
     });
 
     return jobId;
@@ -235,7 +240,12 @@ class TTSService {
   }
 
   private async updateStatus(jobId: string, status: TTSJobStatus, error?: string): Promise<void> {
-    const progress = status === 'completed' ? 100 : undefined;
+    const job = this.jobs.get(jobId);
+    if (!job) return;
+    job.status = status;
+    job.updatedAt = new Date();
+    if (error) job.error = error;
+    if (status === 'completed') job.progress = 100;
 
     await prisma.tTSJob.update({
       where: { id: jobId },
