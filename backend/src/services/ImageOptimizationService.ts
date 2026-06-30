@@ -3,10 +3,16 @@ import fs from 'fs/promises';
 import path from 'path';
 import crypto from 'crypto';
 import { createLogger } from '../lib/logger';
+import { BadRequestError } from '../lib/errors';
 
 const logger = createLogger('image-optimization');
 const CACHE_DIR = path.join(process.cwd(), 'uploads', 'images', 'cache');
-// TODO: Implement format validation (tracked in future issue)
+
+const VALID_FORMATS = ['webp', 'jpeg', 'png'] as const;
+
+function isValidImageFormat(value: unknown): value is 'webp' | 'jpeg' | 'png' {
+  return typeof value === 'string' && (VALID_FORMATS as readonly string[]).includes(value);
+}
 
 interface OptimizationOptions {
   width?: number;
@@ -70,6 +76,12 @@ export const ImageOptimizationService = {
     inputPath: string,
     options: OptimizationOptions = {},
   ): Promise<{ buffer: Buffer; format: string; cacheKey: string; etag: string }> => {
+    if (options.format !== undefined && !isValidImageFormat(options.format)) {
+      throw new BadRequestError(
+        `Invalid image format "${options.format}". Allowed formats: webp, jpeg, png`,
+      );
+    }
+
     const format = options.format || 'webp';
     const cacheKey = ImageOptimizationService.getCacheKey(inputPath, options);
     const cachePath = ImageOptimizationService.getCachePath(cacheKey, format);

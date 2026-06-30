@@ -135,58 +135,77 @@ export class BillingService {
   }
 
   /**
-   * Atomically deduct credits for an action inside a per-user lock.
+   * Atomically deduct credits for an action.
+   * Uses a single conditional UPDATE (WHERE creditsRemaining >= cost) inside a
+   * Prisma transaction so that concurrent requests for the same user cannot both
+   * pass the balance check and over-deduct (TOCTOU race).
    * Throws if the subscription is missing, inactive, or has insufficient credits.
    * Returns updated balance.
    */
   public async deductCredits(userId: string, action: CreditAction): Promise<number> {
-    const sub = await prisma.subscription.findUnique({ where: { userId } });
-    if (!sub) throw new Error('No subscription found for user');
-    if (sub.status !== 'active' && sub.status !== 'trialing') {
-      throw new Error('Subscription is not active');
-    }
-
     const cost = ACTION_COST[action] ?? 1;
-    if (sub.creditsRemaining < cost) {
-      throw new Error(
-        `Insufficient credits. Required: ${cost}, available: ${sub.creditsRemaining}`,
-      );
-    }
 
-    const newBalance = sub.creditsRemaining - cost;
-    await prisma.subscription.update({ where: { userId }, data: { creditsRemaining: newBalance } });
-    await prisma.creditLog.create({
-      data: { userId, action, delta: -cost, balanceAfter: newBalance },
+    return prisma.$transaction(async (tx) => {
+      const sub = await tx.subscription.findUnique({ where: { userId } });
+      if (!sub) throw new Error('No subscription found for user');
+      if (sub.status !== 'active' && sub.status !== 'trialing') {
+        throw new Error('Subscription is not active');
+      }
+
+      // Atomic conditional decrement — the WHERE guard ensures only one concurrent
+      // request wins when the balance is just sufficient for a single deduction.
+      const updated = await tx.subscription.updateMany({
+        where: { userId, creditsRemaining: { gte: cost } },
+        data: { creditsRemaining: { decrement: cost } },
+      });
+
+      if (updated.count === 0) {
+        throw new Error(
+          `Insufficient credits. Required: ${cost}, available: ${sub.creditsRemaining}`,
+        );
+      }
+
+      const newBalance = sub.creditsRemaining - cost;
+      await tx.creditLog.create({
+        data: { userId, action, delta: -cost, balanceAfter: newBalance },
+      });
+
+      return newBalance;
     });
-
-    return newBalance;
   }
 
   /**
    * Atomically deduct credits proportional to actual token usage (1 credit per token).
+   * Uses the same conditional-update pattern as deductCredits to prevent TOCTOU races.
    * Throws if the user has insufficient credits.
    * Returns updated balance.
    */
   public async deductCreditsForTokens(userId: string, tokens: number): Promise<number> {
-    const sub = await prisma.subscription.findUnique({ where: { userId } });
-    if (!sub) throw new Error('No subscription found for user');
-    if (sub.status !== 'active' && sub.status !== 'trialing') {
-      throw new Error('Subscription is not active');
-    }
+    return prisma.$transaction(async (tx) => {
+      const sub = await tx.subscription.findUnique({ where: { userId } });
+      if (!sub) throw new Error('No subscription found for user');
+      if (sub.status !== 'active' && sub.status !== 'trialing') {
+        throw new Error('Subscription is not active');
+      }
 
-    if (sub.creditsRemaining < tokens) {
-      throw new Error(
-        `Insufficient credits. Required: ${tokens}, available: ${sub.creditsRemaining}`,
-      );
-    }
+      const updated = await tx.subscription.updateMany({
+        where: { userId, creditsRemaining: { gte: tokens } },
+        data: { creditsRemaining: { decrement: tokens } },
+      });
 
-    const newBalance = sub.creditsRemaining - tokens;
-    await prisma.subscription.update({ where: { userId }, data: { creditsRemaining: newBalance } });
-    await prisma.creditLog.create({
-      data: { userId, action: 'ai:generate', delta: -tokens, balanceAfter: newBalance },
+      if (updated.count === 0) {
+        throw new Error(
+          `Insufficient credits. Required: ${tokens}, available: ${sub.creditsRemaining}`,
+        );
+      }
+
+      const newBalance = sub.creditsRemaining - tokens;
+      await tx.creditLog.create({
+        data: { userId, action: 'ai:generate', delta: -tokens, balanceAfter: newBalance },
+      });
+
+      return newBalance;
     });
-
-    return newBalance;
   }
 
   /**
