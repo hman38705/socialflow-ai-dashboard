@@ -1,5 +1,6 @@
 import { createLogger } from '../lib/logger';
 import { DynamicConfigService, ConfigKey } from './DynamicConfigService';
+import { auditLogger } from './AuditLogger';
 
 const logger = createLogger('moderation-service');
 
@@ -80,8 +81,29 @@ function getSensitivity(tenantId?: string): SensitivityLevel {
  *                           Logs a warning. Use when availability > safety.
  *                           Requires explicit opt-in: MODERATION_MODE=fail-open
  */
+
+// Written at most once per process lifetime so auditors get a discrete,
+// queryable record of "this process ran with reduced-safety moderation".
+let failOpenAuditEmitted = false;
+
 function getMode(): 'fail-open' | 'fail-closed' {
-  if (process.env.MODERATION_MODE === 'fail-open') return 'fail-open';
+  if (process.env.MODERATION_MODE === 'fail-open') {
+    if (!failOpenAuditEmitted) {
+      failOpenAuditEmitted = true;
+      auditLogger
+        .log({
+          actorId: 'system',
+          action: 'moderation:config:fail-open',
+          resourceType: 'moderation-config',
+          metadata: {
+            environment: process.env.NODE_ENV,
+            mode: 'fail-open',
+          },
+        })
+        .catch(() => {}); // non-blocking; audit write failure must not affect request handling
+    }
+    return 'fail-open';
+  }
   // Default to fail-closed — safer for production
   return 'fail-closed';
 }
