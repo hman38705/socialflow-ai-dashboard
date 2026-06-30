@@ -74,6 +74,7 @@ model Post {
   platform          String
   scheduledAt       DateTime?
   moderationStatus  String       @default("pending")
+  mediaUrls         String[]     @default([])
   createdAt         DateTime     @default(now())
   deletedAt         DateTime?
   organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
