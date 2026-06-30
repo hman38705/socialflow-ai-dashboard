@@ -3,6 +3,43 @@ import { replicaClient } from '../lib/readReplica';
 import { PageLimitParams, toSkipTake } from '../utils/pagination';
 
 export class ListingService {
+  async createListing(
+    data: { title: string; description: string; price?: number; isActive?: boolean; mentorId: string },
+    orgId?: string,
+  ) {
+    return prisma.listing.create({
+      data: { ...data, ...(orgId ? { organizationId: orgId } : {}) },
+    } as any);
+  }
+
+  async findById(id: string, orgId?: string) {
+    const listing = await replicaClient.listing.findUnique({ where: { id } } as any);
+    if (!listing) return null;
+    if (orgId && (listing as any).organizationId && (listing as any).organizationId !== orgId) {
+      return null;
+    }
+    return listing;
+  }
+
+  async deleteListing(id: string, mentorId: string, orgId?: string) {
+    const listing = await prisma.listing.findUnique({ where: { id } } as any);
+    if (!listing) throw new Error('Listing not found');
+    if ((listing as any).mentorId !== mentorId) throw new Error('Unauthorized');
+    if (orgId && (listing as any).organizationId && (listing as any).organizationId !== orgId) {
+      throw new Error('Listing not found');
+    }
+    return prisma.listing.delete({ where: { id } } as any);
+  }
+
+  async list(params: PageLimitParams, orgId?: string): Promise<{ data: any[]; total: number }> {
+    const where = orgId ? { organizationId: orgId } : {};
+    const [total, data] = await Promise.all([
+      replicaClient.listing.count({ where } as any),
+      replicaClient.listing.findMany({ where, ...toSkipTake(params) } as any),
+    ]);
+    return { data, total };
+  }
+
   /**
    * Toggle the visibility of a listing
    * @param listingId ID of the listing
