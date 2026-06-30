@@ -1,7 +1,7 @@
-import { Queue, Worker } from 'bullmq';
+import { Queue, Worker, Job } from 'bullmq';
 import { getRedisConnection } from '../config/runtime';
 import { createLogger } from '../lib/logger';
-import { youTubeService } from '../services/YouTubeService';
+import { youTubeService, YouTubeQuotaError } from '../services/YouTubeService';
 
 const logger = createLogger('youtube-sync-job');
 
@@ -11,6 +11,27 @@ const REPEAT_JOB_ID = 'youtube-analytics-repeat';
 
 // Cron: every 6 hours
 const SYNC_CRON = process.env.YOUTUBE_SYNC_CRON || '0 */6 * * *';
+
+const MAX_ATTEMPTS = 5;
+const DEFAULT_BACKOFF_MS = 60_000;
+
+/**
+ * On a quota-exceeded failure, retry at the quota reset time carried by
+ * YouTubeQuotaError rather than the default exponential backoff slot —
+ * retrying before the daily quota resets only burns attempts on guaranteed
+ * 403s. Any other error falls back to capped exponential backoff.
+ */
+export function computeYoutubeBackoffDelay(
+  attemptsMade: number,
+  _type: string,
+  err: Error,
+  _job: Job,
+): number {
+  if (err instanceof YouTubeQuotaError) {
+    return Math.max(0, err.retryAfter.getTime() - Date.now());
+  }
+  return Math.min(2 ** attemptsMade * 1000, DEFAULT_BACKOFF_MS);
+}
 
 let queue: Queue | null = null;
 let worker: Worker | null = null;
@@ -34,7 +55,7 @@ export const startYouTubeSyncJob = async (): Promise<void> => {
   if (!worker) {
     worker = new Worker(
       QUEUE_NAME,
-      async (job) => {
+      async (job: Job) => {
         const { accessToken, refreshToken, expiresAt } = job.data as YouTubeSyncPayload;
 
         let token = accessToken;
@@ -56,7 +77,10 @@ export const startYouTubeSyncJob = async (): Promise<void> => {
 
         return { synced: resolvedStats.length, timestamp: new Date().toISOString() };
       },
-      { connection: getRedisConnection() },
+      {
+        connection: getRedisConnection(),
+        settings: { backoffStrategy: computeYoutubeBackoffDelay },
+      },
     );
 
     worker.on('completed', (job) => {
@@ -76,6 +100,8 @@ export const startYouTubeSyncJob = async (): Promise<void> => {
       jobId: REPEAT_JOB_ID,
       removeOnComplete: 50,
       removeOnFail: 100,
+      attempts: MAX_ATTEMPTS,
+      backoff: { type: 'custom' },
     },
   );
 
@@ -99,6 +125,11 @@ export const enqueueYouTubeSync = async (payload: YouTubeSyncPayload): Promise<v
   if (!queue) {
     queue = new Queue(QUEUE_NAME, { connection: getRedisConnection() });
   }
-  await queue.add(JOB_NAME, payload, { removeOnComplete: 10, removeOnFail: 20 });
+  await queue.add(JOB_NAME, payload, {
+    removeOnComplete: 10,
+    removeOnFail: 20,
+    attempts: MAX_ATTEMPTS,
+    backoff: { type: 'custom' },
+  });
   logger.info('YouTube one-off sync enqueued');
 };
