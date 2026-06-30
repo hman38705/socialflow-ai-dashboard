@@ -192,6 +192,17 @@ export function encodeCursor(record: { id: string; updatedAt?: Date | null; crea
 }
 
 /**
+ * Thrown by decodeCursorOrThrow when the cursor cannot be parsed.
+ */
+export class InvalidCursorError extends Error {
+  constructor(message = 'Invalid or tampered pagination cursor') {
+    super(message);
+    this.name = 'InvalidCursorError';
+    Object.setPrototypeOf(this, InvalidCursorError.prototype);
+  }
+}
+
+/**
  * Decode a base64 cursor string back to a TimestampCursor.
  * Returns null if the cursor is malformed.
  */
@@ -212,6 +223,18 @@ export function decodeCursor(cursor: string): TimestampCursor | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Decode a base64 cursor string back to a TimestampCursor.
+ * Throws InvalidCursorError if the cursor is malformed or tampered.
+ */
+export function decodeCursorOrThrow(cursor: string): TimestampCursor {
+  const result = decodeCursor(cursor);
+  if (!result) {
+    throw new InvalidCursorError();
+  }
+  return result;
 }
 
 /**

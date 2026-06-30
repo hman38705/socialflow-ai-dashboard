@@ -1,4 +1,5 @@
 import { Request, Response, NextFunction } from 'express';
+import { ZodError } from 'zod';
 import {
   AppError,
   isAppError,
@@ -57,6 +58,38 @@ export const errorHandler = (
   let statusCode = 500;
   let code = 'INTERNAL_SERVER_ERROR';
   let message = 'An unexpected error occurred';
+
+  // ZodError → 400 with per-field validation details
+  if (err instanceof ZodError) {
+    statusCode = 400;
+    code = 'VALIDATION_ERROR';
+    message = 'Request validation failed';
+
+    const fieldErrors: Record<string, string[]> = {};
+    for (const issue of err.issues) {
+      const field = issue.path.join('.') || '_root';
+      if (!fieldErrors[field]) fieldErrors[field] = [];
+      fieldErrors[field].push(issue.message);
+    }
+
+    logger.warn('ZodError validation failed', { issues: err.issues.length, requestId, path: req.path });
+
+    const zodResponse: ErrorResponse = {
+      success: false,
+      code,
+      message,
+      requestId,
+      errors: fieldErrors,
+      timestamp: new Date().toISOString(),
+    };
+
+    if (!isProduction && err.stack) {
+      zodResponse.stack = err.stack;
+    }
+
+    res.status(statusCode).json(zodResponse);
+    return;
+  }
 
   // If it's our custom AppError, use its properties
   if (isAppError(err)) {
