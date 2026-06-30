@@ -8,6 +8,9 @@ const logger = createLogger('alertConfig');
 /** DynamicConfig key prefix for per-queue cooldown overrides */
 const QUEUE_COOLDOWN_KEY_PREFIX = 'ALERT_COOLDOWN_MS_QUEUE_';
 
+/** DynamicConfig key prefix for persisted service config overrides */
+const SERVICE_CONFIG_KEY_PREFIX = 'ALERT_CONFIG_SERVICE_';
+
 export interface AlertThreshold {
   errorRatePercent: number;
   responseTimeMs: number;
@@ -29,6 +32,24 @@ export class AlertConfigService {
   constructor(@inject('DynamicConfigService') @optional() dynamicConfig?: DynamicConfigService) {
     this.dynamicConfig = dynamicConfig;
     this.initializeDefaults();
+    this.loadPersistedOverrides();
+  }
+
+  /**
+   * Load any previously persisted setConfig overrides from DynamicConfigService
+   * so runtime threshold changes survive process restarts.
+   */
+  private loadPersistedOverrides(): void {
+    if (!this.dynamicConfig) return;
+    const services = ['database', 'redis', 's3', 'twitter', 'youtube', 'facebook'];
+    for (const service of services) {
+      const key = `${SERVICE_CONFIG_KEY_PREFIX}${service.toUpperCase()}`;
+      const persisted = this.dynamicConfig.get<ServiceAlertConfig | null>(key, null);
+      if (persisted !== null) {
+        this.configs.set(service, persisted);
+        logger.info('Loaded persisted alert config override', { service });
+      }
+    }
   }
 
   private initializeDefaults(): void {
@@ -64,6 +85,14 @@ export class AlertConfigService {
   setConfig(service: string, config: ServiceAlertConfig): void {
     this.configs.set(service, config);
     logger.info('Alert configuration updated', { service, config });
+
+    // Persist the override so it survives process restarts.
+    if (this.dynamicConfig) {
+      const key = `${SERVICE_CONFIG_KEY_PREFIX}${service.toUpperCase()}`;
+      this.dynamicConfig.set(key, config, 'json').catch((err) => {
+        logger.warn('Failed to persist alert config override', { service, error: (err as Error).message });
+      });
+    }
   }
 
   /**

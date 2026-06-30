@@ -65,17 +65,30 @@ export const startYouTubeSyncJob = async (): Promise<void> => {
           token = refreshed.accessToken;
         }
 
-        const videoIds = await youTubeService.listChannelVideos(token);
-        const resolvedIds = Array.isArray(videoIds) ? videoIds : [];
-        const stats = await youTubeService.getVideoStats(token, resolvedIds);
-        const resolvedStats = Array.isArray(stats) ? stats : [];
+        try {
+          const videoIds = await youTubeService.listChannelVideos(token);
+          const resolvedIds = Array.isArray(videoIds) ? videoIds : [];
+          const stats = await youTubeService.getVideoStats(token, resolvedIds);
+          const resolvedStats = Array.isArray(stats) ? stats : [];
 
-        logger.info('YouTube analytics synced', {
-          jobId: job.id,
-          videoCount: resolvedStats.length,
-        });
+          logger.info('YouTube analytics synced', {
+            jobId: job.id,
+            videoCount: resolvedStats.length,
+          });
 
-        return { synced: resolvedStats.length, timestamp: new Date().toISOString() };
+          return { synced: resolvedStats.length, timestamp: new Date().toISOString() };
+        } catch (err) {
+          if (err instanceof YouTubeQuotaError) {
+            const delayMs = err.retryAfter.getTime() - Date.now();
+            logger.warn('YouTube quota exceeded, delaying retry until quota resets', {
+              jobId: job.id,
+              retryAfter: err.retryAfter.toISOString(),
+              delayMs,
+            });
+            await new Promise((resolve) => setTimeout(resolve, Math.max(delayMs, 0)));
+          }
+          throw err;
+        }
       },
       {
         connection: getRedisConnection(),

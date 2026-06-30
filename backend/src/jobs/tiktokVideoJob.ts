@@ -10,6 +10,12 @@ const logger = createLogger('tiktok-video-job');
 const QUEUE_NAME = 'tiktok-video-upload';
 const JOB_NAME = 'upload-tiktok-video';
 
+/** Maximum concurrent uploads allowed per access token */
+const MAX_CONCURRENT_UPLOADS_PER_TOKEN = 1;
+
+/** In-memory per-token concurrency counter (scoped to this worker process) */
+const tokenConcurrency: Map<string, number> = new Map();
+
 let queue: Queue | null = null;
 let worker: Worker | null = null;
 
@@ -98,6 +104,39 @@ export const startTikTokVideoWorker = (): void => {
 
 async function handleVideoUpload(job: Job): Promise<void> {
   const { accessToken, filePath, fileSizeBytes, request } = job.data as TikTokVideoJobPayload;
+
+  const current = tokenConcurrency.get(accessToken) ?? 0;
+  if (current >= MAX_CONCURRENT_UPLOADS_PER_TOKEN) {
+    const err = new Error(
+      `Concurrency limit reached for token: max ${MAX_CONCURRENT_UPLOADS_PER_TOKEN} concurrent upload(s) per access token`,
+    );
+    logger.warn('TikTok upload rejected: per-token concurrency limit reached', {
+      jobId: job.id,
+      limit: MAX_CONCURRENT_UPLOADS_PER_TOKEN,
+    });
+    throw err;
+  }
+
+  tokenConcurrency.set(accessToken, current + 1);
+  try {
+    await _handleVideoUpload(job, accessToken, filePath, fileSizeBytes, request);
+  } finally {
+    const updated = (tokenConcurrency.get(accessToken) ?? 1) - 1;
+    if (updated <= 0) {
+      tokenConcurrency.delete(accessToken);
+    } else {
+      tokenConcurrency.set(accessToken, updated);
+    }
+  }
+}
+
+async function _handleVideoUpload(
+  job: Job,
+  accessToken: string,
+  filePath: string,
+  fileSizeBytes: number,
+  request: TikTokVideoUploadRequest,
+): Promise<void> {
 
   // Derive a stable session key from the file path so that retries of the
   // same job can resume the same TikTok upload session.
