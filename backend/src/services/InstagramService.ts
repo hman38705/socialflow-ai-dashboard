@@ -467,9 +467,13 @@ class InstagramService {
     }
 
     if (req.scheduledPublishTime) {
+      const now = Date.now();
+      if (req.scheduledPublishTime.getTime() <= now) {
+        throw new Error('Scheduled publish time must be in the future');
+      }
       const minMs = 10 * 60 * 1000; // 10 minutes
       const maxMs = 75 * 24 * 60 * 60 * 1000; // 75 days
-      const delta = req.scheduledPublishTime.getTime() - Date.now();
+      const delta = req.scheduledPublishTime.getTime() - now;
       if (delta < minMs || delta > maxMs) {
         throw new Error('Scheduled publish time must be between 10 minutes and 75 days from now');
       }

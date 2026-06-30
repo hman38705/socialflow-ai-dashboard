@@ -103,6 +103,7 @@ export const startFacebookTokenRefreshJob = async (): Promise<void> => {
 
         let refreshed = 0;
         let failed = 0;
+        const errors: Array<{ key: string; error: string }> = [];
 
         for (const key of keys) {
           const data = await redis.hgetall(key);
@@ -127,19 +128,30 @@ export const startFacebookTokenRefreshJob = async (): Promise<void> => {
               // Revocation is terminal — do not count as a retryable failure
               continue;
             }
-            logger.error('Failed to refresh Facebook token', { key, error: err instanceof Error ? err.message : String(err) });
+            const message = err instanceof Error ? err.message : String(err);
+            logger.error('Failed to refresh Facebook token', { key, error: message });
+            errors.push({ key, error: message });
             failed++;
           }
         }
 
-        logger.info('Facebook token refresh complete', { jobId: job.id, refreshed, failed });
-        return { refreshed, failed };
+        if (failed > 0) {
+          logger.warn('Facebook token refresh completed with failures', { jobId: job.id, refreshed, failed, errors });
+        } else {
+          logger.info('Facebook token refresh complete', { jobId: job.id, refreshed, failed });
+        }
+        return { refreshed, failed, errors };
       },
       { connection: getRedisConnection() },
     );
 
     worker.on('completed', (job) => {
-      logger.info('Facebook token refresh job completed', { jobId: job.id, result: job.returnvalue });
+      const result = job.returnvalue as { refreshed: number; failed: number; errors: Array<{ key: string; error: string }> };
+      if (result?.failed > 0) {
+        logger.warn('Facebook token refresh job completed with failures', { jobId: job.id, result });
+      } else {
+        logger.info('Facebook token refresh job completed', { jobId: job.id, result });
+      }
     });
 
     worker.on('failed', (job, error) => {

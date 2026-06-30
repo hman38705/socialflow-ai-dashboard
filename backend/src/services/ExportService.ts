@@ -3,6 +3,12 @@ import { Readable } from 'stream';
 import { replicaClient } from '../lib/readReplica';
 import { paginatedQuery } from '../lib/paginatedQuery';
 
+/** RFC 4180 — wrap in quotes and escape embedded quotes, commas, and newlines. */
+function csvField(value: string): string {
+  const escaped = value.replace(/"/g, '""');
+  return `"${escaped}"`;
+}
+
 function makeStream(res: Response, headers: Record<string, string>): Readable {
   for (const [k, v] of Object.entries(headers)) res.setHeader(k, v);
   // Use chunked transfer encoding — pre-calculated Content-Length is unreliable
@@ -44,7 +50,7 @@ export const ExportService = {
     });
     stream.push(header);
     await pump(stream, (args) => replicaClient.analyticsEntry.findMany({ where, ...args }), (row) =>
-      `${row.id},"${row.organizationId}","${row.platform}","${row.metric}",${row.value},"${row.recordedAt.toISOString()}"\n`,
+      `${csvField(row.id)},${csvField(row.organizationId)},${csvField(row.platform)},${csvField(row.metric)},${row.value},${csvField(row.recordedAt.toISOString())}\n`,
     );
   },
 
@@ -80,8 +86,7 @@ export const ExportService = {
     });
     stream.push(header);
     await pump(stream, (args) => replicaClient.post.findMany({ where, ...args }), (row) => {
-      const content = row.content.replace(/"/g, '""');
-      return `${row.id},"${row.organizationId}","${content}","${row.platform}","${row.scheduledAt?.toISOString() || ''}","${row.createdAt.toISOString()}"\n`;
+      return `${csvField(row.id)},${csvField(row.organizationId)},${csvField(row.content)},${csvField(row.platform)},${csvField(row.scheduledAt?.toISOString() || '')},${csvField(row.createdAt.toISOString())}\n`;
     });
   },
 

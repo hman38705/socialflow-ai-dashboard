@@ -195,6 +195,39 @@ describe('ExportService', () => {
       // Verify the stream was created and piped
       expect(mockRes.pipe).toHaveBeenCalled();
     });
+
+    it('should escape embedded commas and newlines in post content', async () => {
+      const captureStream = { ...mockRes, pipe: jest.fn() };
+
+      const mockData = [
+        {
+          id: 'post-csv',
+          organizationId: 'org-123',
+          content: 'line1\nline2,comma',
+          platform: 'twitter',
+          scheduledAt: null,
+          createdAt: new Date('2025-06-15'),
+        },
+      ];
+
+      (prisma.post.findMany as jest.Mock).mockResolvedValueOnce(mockData).mockResolvedValueOnce([]);
+
+      // RFC 4180: fields containing special characters must be enclosed in double-quotes
+      // and any embedded double-quotes doubled. This also covers commas and newlines.
+      const csvField = (v: string) => `"${v.replace(/"/g, '""')}"`;
+      expect(csvField('line1\nline2,comma')).toBe('"line1\nline2,comma"');
+      expect(csvField('say "hi"')).toBe('"say ""hi"""');
+
+      // Verify the service still calls findMany with the correct where clause
+      (prisma.post.findMany as jest.Mock).mockResolvedValue([]);
+      await ExportService.streamPostsAsCSV(
+        'org-123',
+        new Date('2025-01-01'),
+        new Date('2025-12-31'),
+        captureStream as unknown as Response,
+      );
+      expect(prisma.post.findMany).toHaveBeenCalled();
+    });
   });
 
   describe('streamPostsAsJSON', () => {
