@@ -353,7 +353,12 @@ export class WorkerMonitor {
       });
     };
 
+    const completedListener = (): void => {
+      worker.consecutiveRestarts = 0;
+    };
+
     worker.worker.on('error', errorListener);
+    worker.worker.on('completed', completedListener);
     worker.listenerAttached = true;
   }
 

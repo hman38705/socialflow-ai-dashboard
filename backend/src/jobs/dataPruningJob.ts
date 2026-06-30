@@ -2,7 +2,7 @@ import { Queue, Worker } from 'bullmq';
 import { trace, SpanStatusCode } from '@opentelemetry/api';
 import { getDataRetentionConfig, getRedisConnection } from '../config/runtime';
 import { createLogger } from '../lib/logger';
-import { filesPrunedTotal, filesArchivedTotal } from '../lib/metrics';
+import { filesPrunedTotal, filesArchivedTotal, dataPruningErrorsTotal } from '../lib/metrics';
 import { runDataPruning } from '../retention/dataPruningService';
 
 const logger = createLogger('data-pruning-job');
@@ -63,6 +63,7 @@ export const startDataPruningJob = async (): Promise<void> => {
     });
 
     worker.on('failed', (job, error) => {
+      dataPruningErrorsTotal.inc();
       logger.error('Data pruning job failed', {
         jobId: job?.id,
         error: error.message,
