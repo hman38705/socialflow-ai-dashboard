@@ -23,7 +23,7 @@
     "format": "prettier --write 'src/**/*.ts'"
   },
   "dependencies": {
-    "@apollo/server": "^5.5.0",
+    "@apollo/server": "^5.5.1",
     "@as-integrations/express4": "^1.1.2",
     "@as-integrations/express5": "^1.1.2",
     "@google/genai": "^1.46.0",
