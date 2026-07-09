@@ -50,7 +50,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     await job.updateProgress(10);
 
     // Validate payout data
-    if (!groupId || !amount || !recipient || !recipientType || !currency) {
+    if (!groupId || amount === undefined || amount === null || !recipient || !recipientType || !currency) {
       throw new Error('Missing required payout fields');
     }
 

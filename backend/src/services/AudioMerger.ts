@@ -4,7 +4,7 @@ import { createLogger } from '../lib/logger';
 
 const logger = createLogger('AudioMerger');
 
-class AudioMerger {
+export class AudioMerger {
   /**
    * Concatenate multiple MP3 files into a single output file.
    * Uses ffmpeg concat demuxer for gapless joining.

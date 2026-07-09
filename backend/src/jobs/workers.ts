@@ -3,8 +3,10 @@ import { Worker } from 'bullmq';
 import { moderate } from '../services/ModerationService';
 import { MODERATION_QUEUE_NAME, enqueueToDLQ } from '../queues/moderationQueue';
 import { getSmsService } from '../services/smsService';
-import { logger } from '../lib/logger';
+import { createLogger } from '../lib/logger';
 import { circuitBreakerService } from '../services/CircuitBreakerService';
+
+const logger = createLogger('workers');
 
 // Email job processor
 async function processEmailJob(job: any) {

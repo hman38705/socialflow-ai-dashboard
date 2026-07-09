@@ -3,7 +3,6 @@ import { z } from 'zod';
 import { authenticate as authMiddleware, AuthRequest } from '../middleware/authenticate';
 import { validate } from '../middleware/validate';
 import { billingService } from '../services/BillingService';
-import { SubscriptionStore, CreditLogStore } from '../models/Subscription';
 import { UserStore } from '../models/User';
 import { createLogger } from '../lib/logger';
 
@@ -67,8 +66,8 @@ router.post('/provision', authMiddleware, async (req: AuthRequest, res: Response
  *       404:
  *         description: No subscription found
  */
-router.get('/subscription', authMiddleware, (req: AuthRequest, res: Response) => {
-  const sub = SubscriptionStore.findByUserId(req.user!.id);
+router.get('/subscription', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const sub = await billingService.getSubscription(req.user!.id);
   if (!sub)
     return res.status(404).json({ message: 'No subscription found. Call /provision first.' });
   return res.json(sub);
@@ -84,8 +83,8 @@ router.get('/subscription', authMiddleware, (req: AuthRequest, res: Response) =>
  *       200:
  *         description: Credit log entries
  */
-router.get('/credits', authMiddleware, (req: AuthRequest, res: Response) => {
-  const logs = CreditLogStore.forUser(req.user!.id);
+router.get('/credits', authMiddleware, async (req: AuthRequest, res: Response) => {
+  const logs = await billingService.getCreditLogs(req.user!.id);
   return res.json(logs);
 });
 

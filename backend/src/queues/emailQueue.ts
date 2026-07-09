@@ -21,6 +21,8 @@ export interface EmailJobData {
     templateId?: string;
     campaignId?: string;
   };
+  status?: 'failed';
+  sesErrorCode?: string;
 }
 
 export interface BulkEmailJobData {

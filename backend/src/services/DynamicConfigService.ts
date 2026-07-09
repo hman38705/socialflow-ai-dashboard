@@ -237,6 +237,14 @@ export class DynamicConfigService {
       cachedKeys: Array.from(this.cache.keys()),
     };
   }
+
+  /**
+   * For synchronous access once the service has been initialized.
+   * Returns null if the service hasn't been created yet.
+   */
+  public static getCachedInstance(): DynamicConfigService | null {
+    return _dynamicConfigServiceInstance;
+  }
 }
 
 // Singleton — initialized with the factory so the cache is populated before first use.
@@ -254,9 +262,3 @@ export async function getDynamicConfigService(): Promise<DynamicConfigService> {
   }
   return _dynamicConfigServicePromise;
 }
-
-// For synchronous access once the service has been initialized.
-// Returns null if the service hasn't been created yet.
-(DynamicConfigService as any).getCachedInstance = (): DynamicConfigService | null => {
-  return _dynamicConfigServiceInstance;
-};

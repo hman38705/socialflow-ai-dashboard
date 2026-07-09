@@ -243,12 +243,7 @@ class TTSService {
   }
 
   private async updateStatus(jobId: string, status: TTSJobStatus, error?: string): Promise<void> {
-    const job = this.jobs.get(jobId);
-    if (!job) return;
-    job.status = status;
-    job.updatedAt = new Date();
-    if (error) job.error = error;
-    if (status === 'completed') job.progress = 100;
+    const progress = status === 'completed' ? 100 : undefined;
 
     await prisma.tTSJob.update({
       where: { id: jobId },

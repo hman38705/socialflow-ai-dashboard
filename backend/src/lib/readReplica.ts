@@ -7,6 +7,7 @@
  * all read-only (analytics) queries to reduce primary DB load.
  */
 import { PrismaClient } from '@prisma/client';
+import { PrismaPg } from '@prisma/adapter-pg';
 import { createLogger } from './logger';
 
 const logger = createLogger('readReplica');
@@ -22,6 +23,8 @@ export function applyReadWriteSplitting(_primary: PrismaClient): void {
  * Read-only Prisma client for analytics queries.
  * Points to DATABASE_REPLICA_URL if configured, otherwise uses the primary.
  */
-export const replicaClient = new PrismaClient({
-  datasourceUrl: process.env.DATABASE_REPLICA_URL ?? process.env.DATABASE_URL,
+const replicaAdapter = new PrismaPg({
+  connectionString: process.env.DATABASE_REPLICA_URL ?? process.env.DATABASE_URL,
 });
+
+export const replicaClient = new PrismaClient({ adapter: replicaAdapter });

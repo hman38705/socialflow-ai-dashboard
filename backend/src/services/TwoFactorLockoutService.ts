@@ -1,6 +1,13 @@
 import Redis from 'ioredis';
 import { getRedisConnection } from '../config/runtime';
-import type { TwoFactorLockoutStore } from '../../../src/services/twoFactorService';
+
+/** Mirrors the shape of TwoFactorLockoutStore in src/services/twoFactorService.ts */
+export interface TwoFactorLockoutStore {
+  recordFailedAttempt(userId: string): Promise<void>;
+  isLockedOut(userId: string): Promise<boolean>;
+  getLockoutRemainingMs(userId: string): Promise<number>;
+  resetFailedAttempts(userId: string): Promise<void>;
+}
 
 const LOCKOUT_THRESHOLD = 5;
 const LOCKOUT_DURATION_S = 5 * 60; // 5 minutes

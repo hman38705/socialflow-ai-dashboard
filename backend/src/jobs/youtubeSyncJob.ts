@@ -1,4 +1,4 @@
-import { Queue, Worker, Job } from 'bullmq';
+import { Queue, Worker, Job, MinimalJob } from 'bullmq';
 import { getRedisConnection } from '../config/runtime';
 import { createLogger } from '../lib/logger';
 import { youTubeService, YouTubeQuotaError } from '../services/YouTubeService';
@@ -23,9 +23,9 @@ const DEFAULT_BACKOFF_MS = 60_000;
  */
 export function computeYoutubeBackoffDelay(
   attemptsMade: number,
-  _type: string,
-  err: Error,
-  _job: Job,
+  _type?: string,
+  err?: Error,
+  _job?: MinimalJob<any, any, string>,
 ): number {
   if (err instanceof YouTubeQuotaError) {
     return Math.max(0, err.retryAfter.getTime() - Date.now());

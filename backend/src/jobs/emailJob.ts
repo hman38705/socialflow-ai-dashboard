@@ -42,7 +42,7 @@ function isNonRetryableSesError(error: any): boolean {
 async function dropEmail(job: Job<EmailJobData>, error: any): Promise<void> {
   const code = getSesErrorCode(error) ?? 'Unknown';
   emailDroppedTotal.inc({ code });
-  await job.update({ ...job.data, status: 'failed', sesErrorCode: code });
+  await job.updateData({ ...job.data, status: 'failed', sesErrorCode: code });
   logger.error(`Email dropped — non-retryable SES error`, { jobId: job.id, code });
 
   droppedSinceLastAlert++;

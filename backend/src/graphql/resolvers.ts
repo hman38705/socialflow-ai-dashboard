@@ -148,16 +148,16 @@ export const resolvers = {
       subscribe: async (_: unknown, { orgId }: { orgId: string }, ctx: GraphQLContext) => {
         await requireAuth(ctx);
 
-        const user = await prisma.user.findUnique({
-          where: { id: ctx.userId! },
+        const membership = await prisma.organizationMember.findUnique({
+          where: { organizationId_userId: { organizationId: orgId, userId: ctx.userId! } },
           select: { organizationId: true },
         });
 
-        if (!user?.organizationId || user.organizationId !== orgId) {
+        if (!membership) {
           throw new Error('FORBIDDEN');
         }
 
-        return pubsub.asyncIterator(`orgUpdate:${orgId}`);
+        return pubsub.asyncIterableIterator(`orgUpdate:${orgId}`);
       },
     },
   },

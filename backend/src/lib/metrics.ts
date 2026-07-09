@@ -106,6 +106,12 @@ export const filesArchivedTotal = new Counter({
   registers: [register],
 });
 
+export const dataPruningErrorsTotal = new Counter({
+  name: 'data_pruning_errors_total',
+  help: 'Total number of data pruning job runs that failed with an error',
+  registers: [register],
+});
+
 export const webhookDispatchFailed = new Counter({
   name: 'webhook_dispatch_failed_total',
   help: 'Total number of webhook delivery attempts that failed with an unexpected dispatcher error',

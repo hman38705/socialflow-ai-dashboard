@@ -1,4 +1,6 @@
-import { logger } from '../lib/logger';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('sms-service');
 
 export interface SmsServiceConfig {
   accountSid?: string;

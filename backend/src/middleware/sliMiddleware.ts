@@ -9,11 +9,12 @@ export function sliMiddleware(req: Request, res: Response, next: NextFunction): 
   let headersSentAt: number | undefined;
 
   const originalWriteHead = res.writeHead.bind(res);
-  // @ts-expect-error — overloaded signatures; we forward all args unchanged
-  res.writeHead = (...args) => {
+  // Cast to `any` — writeHead's overloaded signatures can't be forwarded
+  // generically through a rest-args wrapper.
+  res.writeHead = ((...args: any[]) => {
     headersSentAt ??= Date.now();
-    return originalWriteHead(...args);
-  };
+    return (originalWriteHead as any)(...args);
+  }) as typeof res.writeHead;
 
   res.on('finish', () => {
     const durationMs = (headersSentAt ?? Date.now()) - start;

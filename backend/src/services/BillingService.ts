@@ -234,6 +234,17 @@ export class BillingService {
     return newBalance;
   }
 
+  /** Get the current subscription for a user */
+  public async getSubscription(userId: string): Promise<Subscription | null> {
+    const sub = await prisma.subscription.findUnique({ where: { userId } });
+    return sub ? toSubscription(sub) : null;
+  }
+
+  /** Get the credit log history for a user */
+  public async getCreditLogs(userId: string) {
+    return prisma.creditLog.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
+  }
+
   /** Handle incoming Stripe webhook events */
   public async handleWebhook(rawBody: Buffer, signature: string): Promise<void> {
     const secret = process.env.STRIPE_WEBHOOK_SECRET;

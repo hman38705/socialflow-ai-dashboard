@@ -247,7 +247,7 @@ class YouTubeService {
     accessToken: string,
     pageDelayMs = 500,
   ): Promise<string[] | DegradedResponse<string[]>> {
-    return circuitBreakerService.execute(
+    return circuitBreakerService.execute<string[] | DegradedResponse<string[]>>(
       'youtube',
       async () => {
         const allVideoIds: string[] = [];

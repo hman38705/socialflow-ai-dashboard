@@ -102,6 +102,12 @@ const envSchema = z.object({
       'SLACK_WEBHOOK_URL must start with https://hooks.slack.com/',
     ),
   PAGERDUTY_INTEGRATION_KEY: z.string().optional(),
+
+  // ── SMS (Twilio) ──────────────────────────────────────────────────────────
+  TWILIO_ACCOUNT_SID: z.string().optional(),
+  TWILIO_AUTH_TOKEN: z.string().optional(),
+  TWILIO_FROM_NUMBER: z.string().optional(),
+
   ALERT_ERROR_RATE_PERCENT: z.coerce.number().default(10),
   ALERT_RESPONSE_TIME_MS: z.coerce.number().default(5000),
   ALERT_CONSECUTIVE_FAILURES: z.coerce.number().int().default(3),
