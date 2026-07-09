@@ -33,16 +33,73 @@ jest.mock('stripe', () => {
 });
 
 // ── Prisma mock ───────────────────────────────────────────────────────────────
+// Subscription state lives in-memory here; $transaction just invokes its
+// callback with this same mock object (acting as `tx`).
 
 const mockPayoutFailureCreate = jest.fn();
+const mockPayoutTransactionFindUnique = jest.fn().mockResolvedValue(null);
+const mockPayoutTransactionCreate = jest.fn().mockResolvedValue({});
+const mockPayoutTransactionUpdate = jest.fn().mockResolvedValue({});
 
-jest.mock('../lib/prisma', () => ({
-  prisma: {
-    payoutFailure: {
-      create: mockPayoutFailureCreate,
-    },
+let mockSubscriptionState: Record<string, unknown> | null = null;
+
+interface MockPrisma {
+  subscription: {
+    findUnique: jest.Mock;
+    create: jest.Mock;
+    update: jest.Mock;
+    updateMany: jest.Mock;
+  };
+  creditLog: { create: jest.Mock };
+  payoutFailure: { create: jest.Mock };
+  payoutTransaction: { findUnique: jest.Mock; create: jest.Mock; update: jest.Mock };
+  $transaction: jest.Mock;
+}
+
+const mockPrisma: MockPrisma = {
+  subscription: {
+    findUnique: jest.fn(({ where }: any) =>
+      Promise.resolve(
+        mockSubscriptionState && mockSubscriptionState.userId === where.userId
+          ? { ...mockSubscriptionState }
+          : null,
+      ),
+    ),
+    create: jest.fn(({ data }: any) => {
+      mockSubscriptionState = { ...data };
+      return Promise.resolve({ ...mockSubscriptionState });
+    }),
+    update: jest.fn(({ where, data }: any) => {
+      if (!mockSubscriptionState || mockSubscriptionState.userId !== where.userId) {
+        return Promise.reject(new Error('Record to update not found.'));
+      }
+      mockSubscriptionState = { ...mockSubscriptionState, ...data };
+      return Promise.resolve({ ...mockSubscriptionState });
+    }),
+    updateMany: jest.fn(({ where, data }: any) => {
+      if (
+        mockSubscriptionState &&
+        mockSubscriptionState.userId === where.userId &&
+        (mockSubscriptionState.creditsRemaining as number) >= where.creditsRemaining.gte
+      ) {
+        mockSubscriptionState.creditsRemaining =
+          (mockSubscriptionState.creditsRemaining as number) - data.creditsRemaining.decrement;
+        return Promise.resolve({ count: 1 });
+      }
+      return Promise.resolve({ count: 0 });
+    }),
   },
-}));
+  creditLog: { create: jest.fn().mockResolvedValue({}) },
+  payoutFailure: { create: mockPayoutFailureCreate },
+  payoutTransaction: {
+    findUnique: mockPayoutTransactionFindUnique,
+    create: mockPayoutTransactionCreate,
+    update: mockPayoutTransactionUpdate,
+  },
+  $transaction: jest.fn((cb: (tx: MockPrisma) => unknown) => cb(mockPrisma)),
+};
+
+jest.mock('../lib/prisma', () => ({ prisma: mockPrisma }));
 
 // ── Queue manager mock (needed by payoutJob import) ───────────────────────────
 
@@ -57,7 +114,7 @@ jest.mock('../queues/queueManager', () => ({
 // ── imports (after mocks) ─────────────────────────────────────────────────────
 
 import { BillingService } from '../services/BillingService';
-import { SubscriptionStore, CreditLogStore, PLAN_CREDITS } from '../models/Subscription';
+import { PLAN_CREDITS } from '../models/Subscription';
 import { processPayoutJob } from '../jobs/payoutJob';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
@@ -75,19 +132,11 @@ function makeJob(id: string, data: Record<string, unknown>): any {
 const STRIPE_KEY = 'sk_test_fake';
 
 beforeEach(() => {
-  // Reset in-memory stores between tests by clearing via the public API.
-  // The stores use module-level Map/array, so we patch them directly.
-  const subStore = SubscriptionStore as any;
-  const logStore = CreditLogStore as any;
-
-  // Access the underlying module-level collections via the closure.
-  // We do this by re-importing the module's internal state through a known
-  // method: upsert a sentinel then delete it to get a handle on the map.
-  // Simpler: just clear by overwriting with fresh collections via Object.assign.
-  // Since the stores are plain objects wrapping module-level vars, we can't
-  // directly clear them — instead we rely on unique userIds per test to avoid
-  // cross-test pollution, and reset env vars only.
+  mockSubscriptionState = null;
   jest.clearAllMocks();
+  mockPayoutTransactionFindUnique.mockResolvedValue(null);
+  mockPayoutTransactionCreate.mockResolvedValue({});
+  mockPayoutTransactionUpdate.mockResolvedValue({});
 
   process.env.STRIPE_SECRET_KEY = STRIPE_KEY;
   delete process.env.STRIPE_PAYMENT_METHODS;
@@ -107,7 +156,7 @@ describe('createCheckoutSession — payment_method_types', () => {
 
   beforeEach(() => {
     // Pre-seed a subscription so the service doesn't call provisionUser
-    SubscriptionStore.upsert({
+    mockSubscriptionState = {
       id: 'sub-1',
       userId,
       plan: 'free',
@@ -119,7 +168,7 @@ describe('createCheckoutSession — payment_method_types', () => {
       currentPeriodEnd: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    };
 
     mockSessionCreate.mockResolvedValue({ url: 'https://checkout.stripe.com/session_url' });
   });
@@ -164,7 +213,7 @@ describe('BillingService.refundCredits — compensating transaction', () => {
   const userId = 'user-refund';
 
   beforeEach(() => {
-    SubscriptionStore.upsert({
+    mockSubscriptionState = {
       id: 'sub-2',
       userId,
       plan: 'free',
@@ -176,34 +225,36 @@ describe('BillingService.refundCredits — compensating transaction', () => {
       currentPeriodEnd: null,
       createdAt: new Date(),
       updatedAt: new Date(),
-    });
+    };
   });
 
-  it('restores credits after a deduction', () => {
+  it('restores credits after a deduction', async () => {
     const service = new BillingService();
-    const balanceAfterDeduct = service.deductCredits(userId, 'post:publish');
+    const balanceAfterDeduct = await service.deductCredits(userId, 'post:publish');
     expect(balanceAfterDeduct).toBe(PLAN_CREDITS.free - 1);
 
-    const balanceAfterRefund = service.refundCredits(userId, 'post:publish', 'platform_failure:twitter');
+    const balanceAfterRefund = await service.refundCredits(userId, 'post:publish', 'platform_failure:twitter');
     expect(balanceAfterRefund).toBe(PLAN_CREDITS.free);
   });
 
-  it('appends a credit:topup log entry with the refund reason', () => {
+  it('appends a credit:topup log entry with the refund reason', async () => {
     const service = new BillingService();
-    service.deductCredits(userId, 'post:publish');
-    service.refundCredits(userId, 'post:publish', 'platform_failure:twitter');
+    await service.deductCredits(userId, 'post:publish');
+    await service.refundCredits(userId, 'post:publish', 'platform_failure:twitter');
 
-    const logs = CreditLogStore.forUser(userId, 100);
-    const refundLog = logs.find((l) => l.action === 'credit:topup');
-    expect(refundLog).toBeDefined();
-    expect(refundLog?.metadata?.reason).toBe('platform_failure:twitter');
-    expect(refundLog?.metadata?.refundedAction).toBe('post:publish');
-    expect(refundLog?.delta).toBe(1); // post:publish costs 1 credit
+    const refundCall = mockPrisma.creditLog.create.mock.calls.find(
+      (call: any) => call[0].data.action === 'credit:topup',
+    );
+    expect(refundCall).toBeDefined();
+    const refundLog = refundCall[0].data;
+    expect(refundLog.metadata?.reason).toBe('platform_failure:twitter');
+    expect(refundLog.metadata?.refundedAction).toBe('post:publish');
+    expect(refundLog.delta).toBe(1); // post:publish costs 1 credit
   });
 
-  it('throws when user has no subscription', () => {
+  it('throws when user has no subscription', async () => {
     const service = new BillingService();
-    expect(() => service.refundCredits('nonexistent-user', 'post:publish')).toThrow(
+    await expect(service.refundCredits('nonexistent-user', 'post:publish')).rejects.toThrow(
       'No subscription found for user',
     );
   });

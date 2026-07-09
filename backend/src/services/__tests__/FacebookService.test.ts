@@ -20,7 +20,9 @@
  */
 import nock from 'nock';
 
-const mockExecute = jest.fn((_name: string, fn: () => unknown) => fn());
+const mockExecute = jest.fn<unknown, [string, () => unknown, (() => unknown)?]>(
+  (_name, fn) => fn(),
+);
 
 jest.mock('../CircuitBreakerService', () => ({
   circuitBreakerService: {
@@ -134,8 +136,8 @@ describe('FacebookService', () => {
     });
 
     it('rejects via the circuit-breaker fallback when the breaker is open', async () => {
-      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback: () => unknown) =>
-        fallback(),
+      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback?: () => unknown) =>
+        fallback!(),
       );
 
       await expect(facebookService.getUserPages('user-token')).rejects.toThrow(
@@ -255,8 +257,8 @@ describe('FacebookService', () => {
     });
 
     it('rejects via the circuit-breaker fallback when the breaker is open', async () => {
-      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback: () => unknown) =>
-        fallback(),
+      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback?: () => unknown) =>
+        fallback!(),
       );
 
       await expect(
@@ -292,8 +294,8 @@ describe('FacebookService', () => {
     });
 
     it('degrades gracefully when the circuit breaker is open', async () => {
-      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback: () => unknown) =>
-        fallback(),
+      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback?: () => unknown) =>
+        fallback!(),
       );
 
       const result: any = await facebookService.getPostComments('1234', 'post-123', 'page-token');
@@ -370,8 +372,8 @@ describe('FacebookService', () => {
     });
 
     it('degrades gracefully when the circuit breaker is open', async () => {
-      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback: () => unknown) =>
-        fallback(),
+      mockExecute.mockImplementationOnce((_name: string, _fn: () => unknown, fallback?: () => unknown) =>
+        fallback!(),
       );
 
       const result: any = await facebookService.getPageInsights('page-1', 'page-token');

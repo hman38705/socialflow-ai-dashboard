@@ -10,7 +10,6 @@ const mockLogger: Logger = {
   warn: jest.fn(),
   error: jest.fn(),
   debug: jest.fn(),
-  http: jest.fn(),
 };
 
 const mockScan = jest.fn();

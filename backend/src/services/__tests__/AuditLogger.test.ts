@@ -10,7 +10,7 @@ jest.mock('../../lib/prisma', () => ({
   },
 }));
 
-const prismaMock = prisma as { auditLog: { create: jest.Mock } };
+const prismaMock = prisma as unknown as { auditLog: { create: jest.Mock } };
 
 describe('AuditLogger', () => {
   beforeEach(() => {

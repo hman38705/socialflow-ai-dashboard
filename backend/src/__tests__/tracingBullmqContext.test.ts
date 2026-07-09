@@ -55,11 +55,15 @@ function randomHex(len: number) {
   ).join('');
 }
 
+function getSpanFromContext(ctx: OtelContext): MockSpan | undefined {
+  return ctx.get('__span') as MockSpan | undefined;
+}
+
 const mockTrace = {
   getTracer: jest.fn().mockReturnValue({
     startSpan: jest.fn((name: string, opts?: { kind?: number }) => {
       // Derive parent from active context
-      const parentSpan = mockTrace.getSpan(_activeCtx);
+      const parentSpan = getSpanFromContext(_activeCtx);
       const parentSpanId = parentSpan?.spanContext().spanId;
       const traceId = parentSpan
         ? parentSpan.spanContext().traceId
@@ -67,8 +71,8 @@ const mockTrace = {
       return new MockSpan(traceId, randomHex(16), parentSpanId);
     }),
   }),
-  getActiveSpan: jest.fn(() => mockTrace.getSpan(_activeCtx)),
-  getSpan: jest.fn((ctx: OtelContext) => ctx.get('__span') as MockSpan | undefined),
+  getActiveSpan: jest.fn(() => getSpanFromContext(_activeCtx)),
+  getSpan: jest.fn(getSpanFromContext),
   setSpan: jest.fn((ctx: OtelContext, span: MockSpan) => {
     const next = new Map(ctx);
     next.set('__span', span);

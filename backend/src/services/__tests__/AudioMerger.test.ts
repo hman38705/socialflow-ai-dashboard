@@ -55,7 +55,7 @@ describe('AudioMerger', () => {
       jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
 
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -77,7 +77,7 @@ describe('AudioMerger', () => {
       const unlinkSpy = jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
 
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -94,7 +94,7 @@ describe('AudioMerger', () => {
       jest.spyOn(fs, 'unlink').mockRejectedValue(new Error('cleanup error'));
 
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -111,7 +111,7 @@ describe('AudioMerger', () => {
       jest.spyOn(fs, 'unlink').mockResolvedValue(undefined);
 
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -131,7 +131,7 @@ describe('AudioMerger', () => {
   describe('mergeAudioIntoVideo', () => {
     it('should replace audio by default (mixWithOriginal=false)', async () => {
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -148,7 +148,7 @@ describe('AudioMerger', () => {
 
     it('should mix audio with original when mixWithOriginal=true', async () => {
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -168,7 +168,7 @@ describe('AudioMerger', () => {
 
     it('should use shortest output option to match video duration', async () => {
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'end') setImmediate(cb);
         return chain;
       });
@@ -183,7 +183,7 @@ describe('AudioMerger', () => {
 
     it('should reject on ffmpeg error', async () => {
       const chain = makeFfmpegChain();
-      chain.on.mockImplementation((event: string, cb: Function) => {
+      chain.on.mockImplementation((event: string, cb: (...args: any[]) => void) => {
         if (event === 'error') setImmediate(() => cb(new Error('ffmpeg failed')));
         return chain;
       });

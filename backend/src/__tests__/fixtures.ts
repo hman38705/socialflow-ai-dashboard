@@ -24,7 +24,7 @@ const JWT_SECRET = process.env.JWT_SECRET ?? 'test-secret';
  * Uses the same secret and expiry as the app under test.
  */
 export function generateTestToken(userId: string, expiresIn = '15m'): string {
-  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn });
+  return jwt.sign({ sub: userId }, JWT_SECRET, { expiresIn } as jwt.SignOptions);
 }
 
 /**

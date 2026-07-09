@@ -247,6 +247,12 @@ describe('AIService', () => {
       jest.spyOn(mockCircuitBreaker, 'getStats').mockReturnValue({
         name: 'ai',
         state: 'closed',
+        failures: 0,
+        successes: 0,
+        rejects: 0,
+        fires: 0,
+        fallbacks: 0,
+        latency: { mean: 0, median: 0, p95: 0, p99: 0 },
       });
 
       const status = s.getCircuitStatus();

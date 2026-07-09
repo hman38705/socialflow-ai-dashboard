@@ -210,7 +210,7 @@ describe('ExportService', () => {
         },
       ];
 
-      (prisma.post.findMany as jest.Mock).mockResolvedValueOnce(mockData).mockResolvedValueOnce([]);
+      (replicaClient.post.findMany as jest.Mock).mockResolvedValueOnce(mockData).mockResolvedValueOnce([]);
 
       // RFC 4180: fields containing special characters must be enclosed in double-quotes
       // and any embedded double-quotes doubled. This also covers commas and newlines.
@@ -219,14 +219,14 @@ describe('ExportService', () => {
       expect(csvField('say "hi"')).toBe('"say ""hi"""');
 
       // Verify the service still calls findMany with the correct where clause
-      (prisma.post.findMany as jest.Mock).mockResolvedValue([]);
+      (replicaClient.post.findMany as jest.Mock).mockResolvedValue([]);
       await ExportService.streamPostsAsCSV(
         'org-123',
         new Date('2025-01-01'),
         new Date('2025-12-31'),
         captureStream as unknown as Response,
       );
-      expect(prisma.post.findMany).toHaveBeenCalled();
+      expect(replicaClient.post.findMany).toHaveBeenCalled();
     });
   });
 

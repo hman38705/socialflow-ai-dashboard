@@ -277,7 +277,8 @@ describe('CircuitBreakerService — real opossum integration', () => {
       ['youtube', 15000],
     ] as const)('%s breaker has correct timeout', (service, expected) => {
       const breaker = circuitBreakerService.getBreaker(service);
-      expect(breaker.options.timeout).toBe(expected);
+      // `.options` is set internally by opossum at runtime but not part of its public type defs.
+      expect((breaker as unknown as { options: { timeout: number } }).options.timeout).toBe(expected);
     });
 
     it('returns the same breaker instance on repeated calls', () => {

@@ -12,12 +12,54 @@
 
 // ── Mocks for AIService tests ─────────────────────────────────────────────────
 
-const mockDeductCreditsForTokens = jest.fn().mockReturnValue(900);
+const mockDeductCreditsForTokens = jest.fn().mockResolvedValue(900);
 
 jest.mock('../services/BillingService', () => ({
   billingService: { deductCreditsForTokens: mockDeductCreditsForTokens },
   BillingService: jest.fn(),
 }));
+
+// ── In-memory Prisma mock for the real-BillingService tests below ────────────
+// deductCreditsForTokens runs inside prisma.$transaction, so `$transaction`
+// just invokes its callback with this same mock (acting as `tx`).
+
+let mockSubscriptionState: Record<string, unknown> | null = null;
+
+interface MockPrisma {
+  subscription: {
+    findUnique: jest.Mock;
+    updateMany: jest.Mock;
+  };
+  creditLog: {
+    create: jest.Mock;
+  };
+  $transaction: jest.Mock;
+}
+
+const mockPrisma: MockPrisma = {
+  subscription: {
+    findUnique: jest.fn(() =>
+      Promise.resolve(mockSubscriptionState ? { ...mockSubscriptionState } : null),
+    ),
+    updateMany: jest.fn(({ where, data }: any) => {
+      if (
+        mockSubscriptionState &&
+        (mockSubscriptionState.creditsRemaining as number) >= where.creditsRemaining.gte
+      ) {
+        mockSubscriptionState.creditsRemaining =
+          (mockSubscriptionState.creditsRemaining as number) - data.creditsRemaining.decrement;
+        return Promise.resolve({ count: 1 });
+      }
+      return Promise.resolve({ count: 0 });
+    }),
+  },
+  creditLog: {
+    create: jest.fn().mockResolvedValue({}),
+  },
+  $transaction: jest.fn((cb: (tx: MockPrisma) => unknown) => cb(mockPrisma)),
+};
+
+jest.mock('../lib/prisma', () => ({ prisma: mockPrisma }));
 
 jest.mock('../services/CircuitBreakerService', () => ({
   circuitBreakerService: {
@@ -50,13 +92,12 @@ jest.mock('@google/genai', () => ({
 
 // ── Imports ───────────────────────────────────────────────────────────────────
 
-import { SubscriptionStore, PLAN_CREDITS } from '../models/Subscription';
-import { BillingService } from '../services/BillingService';
+import { PLAN_CREDITS } from '../models/Subscription';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 function provisionUser(userId: string, credits: number) {
-  SubscriptionStore.upsert({
+  mockSubscriptionState = {
     id: userId,
     userId,
     plan: 'pro',
@@ -68,7 +109,7 @@ function provisionUser(userId: string, credits: number) {
     currentPeriodEnd: null,
     createdAt: new Date(),
     updatedAt: new Date(),
-  });
+  };
 }
 
 // ── BillingService unit tests (real implementation) ───────────────────────────
@@ -79,31 +120,31 @@ describe('BillingService.deductCreditsForTokens', () => {
   const { BillingService: RealBillingService } = jest.requireActual('../services/BillingService') as typeof import('../services/BillingService');
   const service = new RealBillingService();
 
-  it('deducts exactly the token count from the user balance (short: 50 tokens)', () => {
+  it('deducts exactly the token count from the user balance (short: 50 tokens)', async () => {
     const userId = 'user-short';
     provisionUser(userId, 500);
 
-    const balance = service.deductCreditsForTokens(userId, 50);
+    const balance = await service.deductCreditsForTokens(userId, 50);
 
     expect(balance).toBe(450);
-    expect(SubscriptionStore.findByUserId(userId)!.creditsRemaining).toBe(450);
+    expect((mockSubscriptionState as { creditsRemaining: number }).creditsRemaining).toBe(450);
   });
 
-  it('deducts exactly the token count from the user balance (long: 800 tokens)', () => {
+  it('deducts exactly the token count from the user balance (long: 800 tokens)', async () => {
     const userId = 'user-long';
     provisionUser(userId, 1000);
 
-    const balance = service.deductCreditsForTokens(userId, 800);
+    const balance = await service.deductCreditsForTokens(userId, 800);
 
     expect(balance).toBe(200);
-    expect(SubscriptionStore.findByUserId(userId)!.creditsRemaining).toBe(200);
+    expect((mockSubscriptionState as { creditsRemaining: number }).creditsRemaining).toBe(200);
   });
 
-  it('throws when credits are insufficient', () => {
+  it('throws when credits are insufficient', async () => {
     const userId = 'user-broke';
     provisionUser(userId, 10);
 
-    expect(() => service.deductCreditsForTokens(userId, 50)).toThrow(
+    await expect(service.deductCreditsForTokens(userId, 50)).rejects.toThrow(
       'Insufficient credits. Required: 50, available: 10',
     );
   });
@@ -113,12 +154,12 @@ describe('BillingService.deductCreditsForTokens', () => {
 
 describe('AIService.generateContent — proportional credit deduction', () => {
   beforeEach(() => {
-    process.env.API_KEY = 'test-key';
+    process.env.GEMINI_API_KEY = 'test-key';
     mockDeductCreditsForTokens.mockClear();
   });
 
   afterEach(() => {
-    delete process.env.API_KEY;
+    delete process.env.GEMINI_API_KEY;
   });
 
   it('calls deductCreditsForTokens with actual token count for short output (50 tokens)', async () => {

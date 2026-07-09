@@ -82,7 +82,7 @@ const mockFfmpeg = jest.fn().mockImplementation(() => {
   };
   return ffmpegChain;
 });
-mockFfmpeg.setFfmpegPath = jest.fn();
+(mockFfmpeg as unknown as { setFfmpegPath: jest.Mock }).setFfmpegPath = jest.fn();
 
 jest.mock('fluent-ffmpeg', () => mockFfmpeg);
 

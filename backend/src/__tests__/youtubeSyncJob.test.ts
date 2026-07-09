@@ -60,7 +60,7 @@ function makeJob(data: YouTubeSyncPayload): any {
 }
 
 function getWorkerProcessor(): (job: any) => Promise<any> {
-  const calls = (Worker as jest.Mock).mock.calls;
+  const calls = (Worker as unknown as jest.Mock).mock.calls;
   if (!calls.length) throw new Error('Worker constructor was not called');
   return calls[0][1];
 }
@@ -251,7 +251,7 @@ describe('enqueueYouTubeSync', () => {
   it('adds a one-off job to the queue with the supplied payload', async () => {
     await enqueueYouTubeSync(makePayload());
 
-    const addMock = (Queue as jest.Mock).mock.results[0].value.add as jest.Mock;
+    const addMock = (Queue as unknown as jest.Mock).mock.results[0].value.add as jest.Mock;
     expect(addMock).toHaveBeenCalledWith(
       'sync-youtube-analytics',
       expect.objectContaining({ accessToken: 'access-token-123' }),

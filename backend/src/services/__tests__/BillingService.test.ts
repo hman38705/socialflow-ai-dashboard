@@ -228,7 +228,7 @@ describe('BillingService', () => {
     it('should throw error when user has no subscription', async () => {
       (prisma.subscription.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.deductCredits('user-123', 'tweet:publish')).rejects.toThrow(
+      await expect(service.deductCredits('user-123', 'post:publish')).rejects.toThrow(
         'No subscription found for user',
       );
     });
@@ -237,7 +237,7 @@ describe('BillingService', () => {
       const inactiveSub = { ...mockSubscription, status: 'canceled' };
       (prisma.subscription.findUnique as jest.Mock).mockResolvedValue(inactiveSub);
 
-      await expect(service.deductCredits('user-123', 'tweet:publish')).rejects.toThrow(
+      await expect(service.deductCredits('user-123', 'post:publish')).rejects.toThrow(
         'Subscription is not active',
       );
     });
@@ -246,7 +246,7 @@ describe('BillingService', () => {
       const lowCreditSub = { ...mockSubscription, creditsRemaining: 0 };
       (prisma.subscription.findUnique as jest.Mock).mockResolvedValue(lowCreditSub);
 
-      await expect(service.deductCredits('user-123', 'tweet:publish')).rejects.toThrow(
+      await expect(service.deductCredits('user-123', 'post:publish')).rejects.toThrow(
         'Insufficient credits',
       );
     });
@@ -258,7 +258,7 @@ describe('BillingService', () => {
         creditsRemaining: 990,
       });
 
-      const result = await service.deductCredits('user-123', 'tweet:publish');
+      const result = await service.deductCredits('user-123', 'post:publish');
 
       expect(result).toBe(990);
       expect(prisma.subscription.update).toHaveBeenCalledWith({
@@ -328,7 +328,7 @@ describe('BillingService', () => {
     it('should throw error when user has no subscription', async () => {
       (prisma.subscription.findUnique as jest.Mock).mockResolvedValue(null);
 
-      await expect(service.refundCredits('user-123', 'tweet:publish')).rejects.toThrow(
+      await expect(service.refundCredits('user-123', 'post:publish')).rejects.toThrow(
         'No subscription found for user',
       );
     });
@@ -340,7 +340,7 @@ describe('BillingService', () => {
         creditsRemaining: 1000,
       });
 
-      const result = await service.refundCredits('user-123', 'tweet:publish', 'operation_failed');
+      const result = await service.refundCredits('user-123', 'post:publish', 'operation_failed');
 
       expect(result).toBe(1000);
       expect(prisma.subscription.update).toHaveBeenCalled();

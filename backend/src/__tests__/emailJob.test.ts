@@ -7,7 +7,7 @@ function makeJob(data: Partial<EmailJobData> = {}): any {
     id: 'job-1',
     data: { to: 'user@example.com', subject: 'Hi', body: 'Hello', ...data },
     updateProgress: jest.fn().mockResolvedValue(undefined),
-    update: jest.fn().mockResolvedValue(undefined),
+    updateData: jest.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -26,7 +26,7 @@ describe('processEmailJob', () => {
   it('rethrows a retryable error without dropping the email', async () => {
     const job = makeJob({ to: '' });
     await expect(processEmailJob(job)).rejects.toThrow('Failed to send email');
-    expect(job.update).not.toHaveBeenCalled();
+    expect(job.updateData).not.toHaveBeenCalled();
   });
 
   it('drops the email and records the SES error code for a non-retryable SES error', async () => {
@@ -41,12 +41,12 @@ describe('processEmailJob', () => {
     });
 
     await expect(processEmailJob(job)).rejects.toThrow(UnrecoverableError);
-    expect(job.update).toHaveBeenCalledWith(
+    expect(job.updateData).toHaveBeenCalledWith(
       expect.objectContaining({ status: 'failed', sesErrorCode: 'MessageRejected' }),
     );
 
-    const metric = emailDroppedTotal.get();
-    const sample = metric.values.find((v: { labels: { code?: string } }) => v.labels.code === 'MessageRejected');
+    const metric = await emailDroppedTotal.get();
+    const sample = metric.values.find((v) => v.labels.code === 'MessageRejected');
     expect(sample?.value).toBe(1);
   });
 });

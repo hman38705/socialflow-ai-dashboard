@@ -7,7 +7,7 @@ describe('serviceFactory', () => {
 
   it('resolves DI services through the container when loaded', () => {
     const registry = new Map<string, object>();
-    const getMock = jest.fn().mockImplementation((key: string) => {
+    const getMock = jest.fn<(key: string) => object>().mockImplementation((key: string) => {
       if (!registry.has(key)) {
         registry.set(key, { key });
       }
@@ -45,7 +45,7 @@ describe('serviceFactory', () => {
 
   it('returns the same singleton instance for repeated getHealthService calls', () => {
     const registry = new Map<string, object>();
-    const getMock = jest.fn().mockImplementation((key: string) => {
+    const getMock = jest.fn<(key: string) => object>().mockImplementation((key: string) => {
       if (!registry.has(key)) {
         registry.set(key, { key });
       }

@@ -36,7 +36,7 @@ beforeAll(() => {
 // Table-driven: invalid body payloads → 422
 // ---------------------------------------------------------------------------
 describe('PUT /health/config/:service — invalid body payloads return 422', () => {
-  const cases: Array<{ label: string; body: unknown; field: string }> = [
+  const cases: Array<{ label: string; body: object; field: string }> = [
     {
       label: 'errorRatePercent above 100',
       body: { ...VALID_PAYLOAD, thresholds: { ...VALID_PAYLOAD.thresholds, errorRatePercent: 101 } },

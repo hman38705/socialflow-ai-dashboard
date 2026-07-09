@@ -84,7 +84,7 @@ function makeVideoJob(overrides: Partial<Record<string, any>> = {}): any {
 }
 
 function getWorkerProcessor(): (job: any) => Promise<void> {
-  const calls = (Worker as jest.Mock).mock.calls;
+  const calls = (Worker as unknown as jest.Mock).mock.calls;
   if (!calls.length) throw new Error('Worker constructor was not called');
   return calls[0][1];
 }

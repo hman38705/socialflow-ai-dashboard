@@ -7,7 +7,7 @@ export default class CircuitBreaker<T extends (...args: unknown[]) => unknown> {
   }
 
   async fire(...args: Parameters<T>): Promise<Awaited<ReturnType<T>>> {
-    return this._fn(...args);
+    return this._fn(...args) as Awaited<ReturnType<T>>;
   }
 
   fallback(fn: (...args: Parameters<T>) => Promise<Awaited<ReturnType<T>>> | ReturnType<T>) {

@@ -22,7 +22,12 @@ function matchPattern(key: string, pattern: string): boolean {
 
 let _pipelineKeys: string[] = [];
 
-const mockPipeline = {
+interface MockPipeline {
+  del: jest.Mock<MockPipeline, [string]>;
+  exec: jest.Mock<Promise<unknown[]>, []>;
+}
+
+const mockPipeline: MockPipeline = {
   del: jest.fn((key: string) => {
     _pipelineKeys.push(key);
     return mockPipeline;
