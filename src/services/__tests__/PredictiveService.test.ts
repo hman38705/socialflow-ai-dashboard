@@ -1,153 +1,116 @@
+/**
+ * PredictiveService tests
+ *
+ * PredictiveService is a thin API client — all scoring/ML logic lives in
+ * backend/src/services/PredictiveService.ts. These tests mock the HTTP
+ * layer (`request`) and verify the client calls the right endpoint with
+ * the right payload, and passes the response through unchanged.
+ */
+
+const mockRequest = jest.fn();
+
+jest.mock('../../api/core/request', () => ({
+  request: (...args: unknown[]) => mockRequest(...args),
+}));
+
 import { predictiveService } from '../PredictiveService';
-import { PostAnalysisInput } from '../../types/predictive';
+import { PostAnalysisInput, ReachPrediction, MLModelMetrics } from '../../types/predictive';
+
+function makePrediction(overrides: Partial<ReachPrediction> = {}): ReachPrediction {
+  return {
+    reachScore: 72,
+    estimatedReach: { min: 100, max: 500, expected: 300 },
+    confidence: 0.8,
+    factors: [],
+    recommendations: ['Add more hashtags'],
+    ...overrides,
+  };
+}
 
 describe('PredictiveService', () => {
+  beforeEach(() => {
+    mockRequest.mockReset();
+  });
+
   describe('predictReach', () => {
-    it('should predict reach for a basic post', async () => {
+    it('calls POST /predictive/reach with the post input and returns the prediction', async () => {
       const input: PostAnalysisInput = {
         content: 'Test post content',
         platform: 'instagram',
       };
+      const prediction = makePrediction();
+      mockRequest.mockResolvedValue(prediction);
 
-      const prediction = await predictiveService.predictReach(input);
+      const result = await predictiveService.predictReach(input);
 
-      expect(prediction).toBeDefined();
-      expect(prediction.reachScore).toBeGreaterThanOrEqual(0);
-      expect(prediction.reachScore).toBeLessThanOrEqual(100);
-      expect(prediction.estimatedReach).toBeDefined();
-      expect(prediction.confidence).toBeGreaterThan(0);
-      expect(prediction.confidence).toBeLessThanOrEqual(1);
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          method: 'POST',
+          url: '/predictive/reach',
+          body: expect.objectContaining({ content: 'Test post content', platform: 'instagram' }),
+        }),
+      );
+      expect(result).toEqual(prediction);
     });
 
-    it('should give higher score for optimized content', async () => {
-      const basicPost: PostAnalysisInput = {
-        content: 'Test',
-        platform: 'instagram',
-      };
-
-      const optimizedPost: PostAnalysisInput = {
-        content: 'Amazing new product launch! 🚀 Check it out and let us know what you think! #innovation #tech #startup',
-        platform: 'instagram',
-        hashtags: ['innovation', 'tech', 'startup'],
-        mediaType: 'image',
-        followerCount: 450000,
-      };
-
-      const basicPrediction = await predictiveService.predictReach(basicPost);
-      const optimizedPrediction = await predictiveService.predictReach(optimizedPost);
-
-      expect(optimizedPrediction.reachScore).toBeGreaterThan(basicPrediction.reachScore);
-    });
-
-    it('should provide recommendations for improvement', async () => {
+    it('serialises scheduledTime to an ISO string in the request body', async () => {
+      const scheduledTime = new Date('2025-01-01T12:00:00.000Z');
       const input: PostAnalysisInput = {
-        content: 'Short post',
-        platform: 'instagram',
+        content: 'Scheduled post',
+        platform: 'tiktok',
+        scheduledTime,
       };
+      mockRequest.mockResolvedValue(makePrediction());
 
-      const prediction = await predictiveService.predictReach(input);
+      await predictiveService.predictReach(input);
 
-      expect(prediction.recommendations).toBeDefined();
-      expect(Array.isArray(prediction.recommendations)).toBe(true);
-      expect(prediction.recommendations.length).toBeGreaterThan(0);
-    });
-
-    it('should calculate estimated reach based on follower count', async () => {
-      const input: PostAnalysisInput = {
-        content: 'Test post with good content and hashtags #test #social',
-        platform: 'instagram',
-        hashtags: ['test', 'social'],
-        followerCount: 100000,
-      };
-
-      const prediction = await predictiveService.predictReach(input);
-
-      expect(prediction.estimatedReach.expected).toBeGreaterThan(0);
-      expect(prediction.estimatedReach.min).toBeLessThan(prediction.estimatedReach.expected);
-      expect(prediction.estimatedReach.max).toBeGreaterThan(prediction.estimatedReach.expected);
-    });
-
-    it('should suggest optimal posting time', async () => {
-      const input: PostAnalysisInput = {
-        content: 'Test post',
-        platform: 'instagram',
-      };
-
-      const prediction = await predictiveService.predictReach(input);
-
-      expect(prediction.optimalPostTime).toBeDefined();
-      expect(prediction.optimalPostTime).toBeInstanceOf(Date);
+      const callArg = mockRequest.mock.calls[0][1];
+      expect(callArg.body.scheduledTime).toBe(scheduledTime.toISOString());
     });
   });
 
   describe('batchPredict', () => {
-    it('should predict reach for multiple posts', async () => {
+    it('predicts reach for multiple posts and preserves order', async () => {
       const inputs: PostAnalysisInput[] = [
         { content: 'Post 1', platform: 'instagram' },
         { content: 'Post 2', platform: 'tiktok' },
         { content: 'Post 3', platform: 'linkedin' },
       ];
+      mockRequest
+        .mockResolvedValueOnce(makePrediction({ reachScore: 10 }))
+        .mockResolvedValueOnce(makePrediction({ reachScore: 20 }))
+        .mockResolvedValueOnce(makePrediction({ reachScore: 30 }));
 
       const predictions = await predictiveService.batchPredict(inputs);
 
       expect(predictions).toHaveLength(3);
-      predictions.forEach(pred => {
-        expect(pred.reachScore).toBeGreaterThanOrEqual(0);
-        expect(pred.reachScore).toBeLessThanOrEqual(100);
-      });
-    });
-  });
-
-  describe('comparePosts', () => {
-    it('should compare two posts and determine winner', async () => {
-      const postA: PostAnalysisInput = {
-        content: 'Basic post',
-        platform: 'instagram',
-      };
-
-      const postB: PostAnalysisInput = {
-        content: 'Optimized post with great content! 🚀 #trending #viral',
-        platform: 'instagram',
-        hashtags: ['trending', 'viral'],
-        mediaType: 'video',
-      };
-
-      const comparison = await predictiveService.comparePosts(postA, postB);
-
-      expect(comparison.postA).toBeDefined();
-      expect(comparison.postB).toBeDefined();
-      expect(comparison.winner).toMatch(/^(A|B|tie)$/);
-      expect(comparison.postB.reachScore).toBeGreaterThan(comparison.postA.reachScore);
+      expect(predictions.map((p) => p.reachScore)).toEqual([10, 20, 30]);
+      expect(mockRequest).toHaveBeenCalledTimes(3);
     });
   });
 
   describe('getModelMetrics', () => {
-    it('should return model metrics', () => {
-      const metrics = predictiveService.getModelMetrics();
+    it('calls GET /predictive/history/{postId} and returns the metrics', async () => {
+      const metrics: MLModelMetrics = {
+        accuracy: 0.94,
+        lastTrainedAt: new Date('2025-01-01T00:00:00.000Z'),
+        sampleSize: 12450,
+        version: '2.4.1',
+      };
+      mockRequest.mockResolvedValue({ metrics });
 
-      expect(metrics.accuracy).toBeGreaterThan(0);
-      expect(metrics.accuracy).toBeLessThanOrEqual(1);
-      expect(metrics.version).toBeDefined();
-      expect(metrics.sampleSize).toBeGreaterThan(0);
-      expect(metrics.lastTrainedAt).toBeInstanceOf(Date);
-    });
-  });
+      const result = await predictiveService.getModelMetrics('post-123');
 
-  describe('updateHistoricalData', () => {
-    it('should update historical performance data', () => {
-      const initialMetrics = predictiveService.getModelMetrics();
-      
-      predictiveService.updateHistoricalData(
-        'instagram',
-        75000,
-        6.5,
-        'image',
-        ['tech', 'innovation']
+      expect(mockRequest).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({
+          method: 'GET',
+          url: '/predictive/history/{postId}',
+          path: { postId: 'post-123' },
+        }),
       );
-
-      // Verify data was updated (metrics should remain consistent)
-      const updatedMetrics = predictiveService.getModelMetrics();
-      expect(updatedMetrics.version).toBe(initialMetrics.version);
+      expect(result.metrics).toEqual(metrics);
     });
   });
 });

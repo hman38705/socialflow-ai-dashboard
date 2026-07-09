@@ -27,7 +27,7 @@ export const PredictiveReachDashboard: React.FC = () => {
     accuracy: 0.94,
     sampleSize: 12450,
     version: '2.4.1',
-    lastTraining: new Date()
+    lastTrainedAt: new Date()
   });
 
   useEffect(() => {

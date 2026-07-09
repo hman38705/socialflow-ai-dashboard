@@ -486,5 +486,6 @@ export class AnalyticsService {
     const granularity = getGranularity(from, to);
     return aggregateByTimeBucket(records, granularity, from, to);
   }
+}
 
 export const analyticsService = new AnalyticsService();

@@ -299,3 +299,4 @@ These will be preserved in translations!"
       </div>
     </div>
   );
+};

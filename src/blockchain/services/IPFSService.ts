@@ -2,7 +2,7 @@ import { IPFSClient, IPFSConfig, IPFSUploadResult, DEFAULT_GATEWAYS } from './IP
 import { IPFSUploader } from './IPFSUploader';
 import { IPFSRetriever } from './IPFSRetriever';
 
-export { IPFSConfig, IPFSUploadResult };
+export type { IPFSConfig, IPFSUploadResult };
 
 export class IPFSService {
   config: IPFSConfig
