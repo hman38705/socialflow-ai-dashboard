@@ -50,7 +50,7 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
     setLoading(true);
     try {
       const codes = twoFactorService.generateRecoveryCodes();
-      setRecoveryCodes(codes.map(c => c.code));
+      setRecoveryCodes(codes);
       setCodesAcknowledged(false);
       setStep('SHOWING_CODES');
     } catch (e) {
@@ -87,7 +87,7 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
     setLoading(true);
     try {
       await twoFactorService.enable(secret);
-      await twoFactorService.storeRecoveryCodes(recoveryCodes.map(code => ({ code })));
+      await twoFactorService.storeRecoveryCodes(recoveryCodes);
       setSecret('');
       setUri('');
       setToken('');
@@ -144,7 +144,7 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
     setLoading(true);
     try {
       const codes = await twoFactorService.regenerateRecoveryCodes();
-      setRecoveryCodes(codes.map(c => c.code));
+      setRecoveryCodes(codes);
       setCodesAcknowledged(false);
       setStep('SHOWING_CODES');
     } catch (e) {
@@ -190,6 +190,7 @@ const TwoFactorSetup: React.FC<TwoFactorSetupProps> = ({
           <button onClick={onCancel} className="w-full px-4 py-2 text-gray-600 hover:underline">
             Cancel
           </button>
+          {error && <p className="text-red-600 text-sm">{error}</p>}
         </div>
       )}
 

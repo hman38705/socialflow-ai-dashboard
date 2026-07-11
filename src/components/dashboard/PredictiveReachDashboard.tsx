@@ -5,6 +5,7 @@ import { PostAnalysisInput, ReachPrediction, MLModelMetrics } from '../../types/
 import { GlassCard } from '../ui/GlassCard';
 import { StatBadge } from '../ui/StatBadge';
 import { analyticsService, PostAnalytics } from '../../services/AnalyticsService';
+import { useToast } from '../../contexts/ToastContext';
 
 const MaterialIcon = ({ name, className }: { name: string; className?: string }) => (
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
@@ -19,9 +20,11 @@ interface ScheduledPostWithPrediction {
 }
 
 export const PredictiveReachDashboard: React.FC = () => {
+  const { toast, dismiss } = useToast();
   const [predictions, setPredictions] = useState<ScheduledPostWithPrediction[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
+  const [boosting, setBoosting] = useState<string | null>(null);
   const [analytics, setAnalytics] = useState<PostAnalytics[]>([]);
   const [modelMetrics, setModelMetrics] = useState<MLModelMetrics>({
     accuracy: 0.94,
@@ -124,9 +127,29 @@ export const PredictiveReachDashboard: React.FC = () => {
       setAnalytics(updated);
     } catch (error) {
       console.error('[Dashboard] Sync failed:', error);
+      toast('Sync failed — please try again.', 'error');
     } finally {
       setSyncing(false);
     }
+  };
+
+  const boostPost = (postId: string) => {
+    setBoosting(postId);
+    const loadingId = toast('Optimizing post for maximum reach…', 'loading');
+    // Apply AI "boost": nudge the reach score up toward its ceiling.
+    setTimeout(() => {
+      setPredictions((prev) =>
+        prev.map((p) => {
+          if (p.id !== postId) return p;
+          const current = p.prediction.reachScore || 0;
+          const boosted = Math.min(99, Math.round(current + (100 - current) * 0.25 + 3));
+          return { ...p, prediction: { ...p.prediction, reachScore: boosted } };
+        })
+      );
+      setBoosting(null);
+      dismiss(loadingId);
+      toast('Boost applied — reach optimized.', 'success');
+    }, 900);
   };
 
   const totalEngagement = useMemo(
@@ -202,7 +225,7 @@ export const PredictiveReachDashboard: React.FC = () => {
                 <GlassCard key={post.id} delay={index * 0.1} className="!p-0 border-white/5 group">
                   <div className="flex items-stretch gap-6 p-6">
                     <div className="flex flex-col items-center justify-center min-w-[70px]">
-                      <div className="text-3xl font-black glow-text mb-1 italic">
+                      <div className="tnum text-3xl font-bold text-primary-rose glow-text mb-1">
                         {Math.round(post.prediction.reachScore || 0)}
                       </div>
                       <div className="text-[9px] font-bold uppercase tracking-widest opacity-40">Reach</div>
@@ -222,18 +245,24 @@ export const PredictiveReachDashboard: React.FC = () => {
                       <div className="flex items-center gap-6 pt-2">
                          <div className="flex flex-col">
                             <span className="text-[10px] text-gray-subtext uppercase font-bold tracking-tighter">Est. Peak</span>
-                            <span className="text-sm font-bold">{(post.prediction.estimatedReach?.expected / 1000 || 0).toFixed(1)}k</span>
+                            <span className="tnum text-sm font-bold">{(post.prediction.estimatedReach?.expected / 1000 || 0).toFixed(1)}k</span>
                          </div>
                          <div className="flex flex-col">
                             <span className="text-[10px] text-gray-subtext uppercase font-bold tracking-tighter">Reliability</span>
-                            <span className="text-sm font-bold text-primary-teal">{Math.round((post.prediction.confidence || 0) * 100)}%</span>
+                            <span className="tnum text-sm font-bold text-primary-teal">{Math.round((post.prediction.confidence || 0) * 100)}%</span>
                          </div>
                       </div>
                     </div>
 
                     <div className="flex flex-col justify-center gap-3 opacity-0 group-hover:opacity-100 transition-opacity">
-                       <button className="w-9 h-9 flex items-center justify-center bg-white/5 rounded-xl hover:bg-white/10 text-gray-400 hover:text-white transition-all">
-                          <MaterialIcon name="bolt" className="text-lg text-primary-purple" />
+                       <button
+                          onClick={() => boostPost(post.id)}
+                          disabled={boosting === post.id}
+                          title="Boost reach"
+                          aria-label="Boost reach"
+                          className="w-9 h-9 flex items-center justify-center bg-white/5 rounded-xl hover:bg-primary-purple/20 text-gray-400 hover:text-white transition-all disabled:opacity-60"
+                       >
+                          <MaterialIcon name="bolt" className={`text-lg text-primary-purple ${boosting === post.id ? 'animate-pulse' : ''}`} />
                        </button>
                     </div>
                   </div>

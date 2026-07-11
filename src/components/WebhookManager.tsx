@@ -1,8 +1,15 @@
 import React, { useCallback, useEffect, useReducer, useState } from 'react';
-import { WebhooksService } from '../api/services/WebhooksService';
-import type { WebhookDelivery, WebhookEventType, WebhookSubscription } from '../api/models';
+import type { WebhookDelivery, WebhookSubscription } from '../api/models';
 
 // Event types sourced from src/schemas/webhooks.ts (frontend mirror)
+type WebhookEventType =
+  | 'post.published'
+  | 'post.failed'
+  | 'analytics.report_ready'
+  | 'blockchain.transaction_completed'
+  | 'blockchain.transaction_failed'
+  | 'system.health_check';
+
 const SUPPORTED_EVENTS: WebhookEventType[] = [
   'post.published',
   'post.failed',
@@ -11,6 +18,83 @@ const SUPPORTED_EVENTS: WebhookEventType[] = [
   'blockchain.transaction_failed',
   'system.health_check',
 ];
+
+// ── Frontend-only webhook store ───────────────────────────────────────────────
+// The generated WebhooksService talks to a backend that is not running in this
+// demo. To keep every button functional in frontend-only mode, we back the
+// manager with an in-memory store that mirrors the same async surface.
+
+const uid = (): string =>
+  (crypto.randomUUID?.() ?? Math.random().toString(36).slice(2)).replace(/-/g, '');
+
+const store: {
+  webhooks: WebhookSubscription[];
+  deliveries: Record<string, WebhookDelivery[]>;
+} = {
+  webhooks: [
+    {
+      id: uid(),
+      url: 'https://hooks.example.com/socialflow',
+      events: ['post.published', 'post.failed'],
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    },
+  ],
+  deliveries: {},
+};
+
+const delay = (ms = 250) => new Promise((r) => setTimeout(r, ms));
+
+function makeDelivery(eventType: WebhookEventType): WebhookDelivery {
+  return {
+    id: uid(),
+    eventType,
+    status: 'success',
+    attempts: 1,
+    responseStatus: 200,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+const WebhooksService = {
+  async listWebhooks(): Promise<WebhookSubscription[]> {
+    await delay();
+    return [...store.webhooks];
+  },
+  async createWebhook(input: { url: string; secret: string; events: WebhookEventType[] }): Promise<WebhookSubscription> {
+    await delay();
+    const created: WebhookSubscription = {
+      id: uid(),
+      url: input.url,
+      events: input.events,
+      isActive: true,
+      createdAt: new Date().toISOString(),
+    };
+    store.webhooks = [...store.webhooks, created];
+    return created;
+  },
+  async deleteWebhook(id: string): Promise<void> {
+    await delay();
+    store.webhooks = store.webhooks.filter((w) => w.id !== id);
+    delete store.deliveries[id];
+  },
+  async testWebhook(id: string, input: { eventType: WebhookEventType }): Promise<{ message: string }> {
+    await delay();
+    const delivery = makeDelivery(input.eventType);
+    store.deliveries[id] = [delivery, ...(store.deliveries[id] ?? [])];
+    return { message: `Test "${input.eventType}" delivered (200 OK).` };
+  },
+  async listDeliveries(id: string): Promise<WebhookDelivery[]> {
+    await delay();
+    return [...(store.deliveries[id] ?? [])];
+  },
+  async replayDelivery(id: string, _deliveryId: string): Promise<void> {
+    await delay();
+    const original = (store.deliveries[id] ?? []).find((d) => d.id === _deliveryId);
+    const replayed = makeDelivery((original?.eventType as WebhookEventType) ?? 'post.published');
+    store.deliveries[id] = [replayed, ...(store.deliveries[id] ?? [])];
+  },
+};
 
 // ── State ─────────────────────────────────────────────────────────────────────
 
@@ -369,7 +453,7 @@ function TestModal({ webhookId, onClose }: { webhookId: string; onClose: () => v
 
 export default function WebhookManager() {
   const [state, dispatch] = useReducer(reducer, {
-    webhooks: [], loading: false, error: null, deliveries: {}, expandedId: null, replayingDeliveries: new Set(),
+    webhooks: [], loading: false, error: null, deliveries: {}, expandedId: null, replayingDeliveries: new Set<string>(),
   });
   const [testingId, setTestingId]       = useState<string | null>(null);
   const [pendingSecret, setPendingSecret] = useState<string | null>(null);
