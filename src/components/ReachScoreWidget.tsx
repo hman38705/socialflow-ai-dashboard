@@ -12,26 +12,35 @@ export const ReachScoreWidget: React.FC<ReachScoreWidgetProps> = ({ postData, on
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    analyzePrediction();
-  }, [postData.content, postData.platform, postData.scheduledTime, postData]);
+    // Guard against out-of-order resolutions: a fast typist can trigger several
+    // predictions; only the most recent effect run is allowed to commit state.
+    let cancelled = false;
 
-  const analyzePrediction = async () => {
     if (!postData.content || postData.content.length < 3) {
       setPrediction(null);
+      setLoading(false);
       return;
     }
 
     setLoading(true);
-    try {
-      const result = await predictiveService.predictReach(postData);
-      setPrediction(result);
-      onUpdate?.(result);
-    } catch (error) {
-      console.error('Failed to predict reach:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
+    predictiveService
+      .predictReach(postData)
+      .then((result) => {
+        if (cancelled) return;
+        setPrediction(result);
+        onUpdate?.(result);
+      })
+      .catch((error) => {
+        if (!cancelled) console.error('Failed to predict reach:', error);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [postData, onUpdate]);
 
   const getScoreColor = (score: number): string => {
     if (score >= 80) return 'text-green-400';

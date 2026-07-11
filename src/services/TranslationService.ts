@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from '@google/genai';
+import { GoogleGenAI } from '@google/genai';
 import {
   TranslationRequest,
   TranslationResult,
@@ -21,8 +21,8 @@ import {
  * - Translation history
  */
 class TranslationService {
-  private genAI: GoogleGenerativeAI | null = null;
-  private model: any = null;
+  private genAI: GoogleGenAI | null = null;
+  private model: string | null = null;
   private readonly STORAGE_KEY = 'socialflow_translation_history';
   private readonly MAX_HISTORY = 50;
 
@@ -58,12 +58,12 @@ class TranslationService {
    * Initialize Google Gemini AI
    */
   private initializeAI(): void {
-    const apiKey = import.meta.env.VITE_API_KEY || process.env.API_KEY;
+    const apiKey = import.meta.env.VITE_API_KEY;
     
     if (apiKey && apiKey !== 'your_gemini_api_key_here') {
       try {
-        this.genAI = new GoogleGenerativeAI(apiKey);
-        this.model = this.genAI.getGenerativeModel({ model: 'gemini-pro' });
+        this.genAI = new GoogleGenAI({ apiKey });
+        this.model = 'gemini-2.5-flash';
       } catch (error) {
         console.warn('Failed to initialize Gemini AI:', error);
       }
@@ -257,23 +257,25 @@ class TranslationService {
     sourceLang: string,
     targetLang: string
   ): Promise<string> {
-    if (!this.model) {
+    if (!this.genAI || !this.model) {
       throw new Error('Gemini AI not initialized');
     }
 
     const sourceLanguageName = this.getLanguageName(sourceLang);
     const targetLanguageName = this.getLanguageName(targetLang);
 
-    const prompt = `Translate the following text from ${sourceLanguageName} to ${targetLanguageName}. 
+    const prompt = `Translate the following text from ${sourceLanguageName} to ${targetLanguageName}.
 Preserve the tone, style, and meaning. Only return the translated text, nothing else.
 
 Text to translate: "${text}"
 
 Translation:`;
 
-    const result = await this.model.generateContent(prompt);
-    const response = await result.response;
-    return response.text().trim();
+    const result = await this.genAI.models.generateContent({
+      model: this.model,
+      contents: prompt,
+    });
+    return (result.text ?? '').trim();
   }
 
   /**
@@ -355,7 +357,7 @@ Translation:`;
     }
 
     // DeepL (mock - check for API key in production)
-    const deeplApiKey = import.meta.env.VITE_DEEPL_API_KEY || process.env.DEEPL_API_KEY;
+    const deeplApiKey = import.meta.env.VITE_DEEPL_API_KEY;
     providers.push({
       name: 'DeepL',
       available: !!deeplApiKey,
@@ -365,7 +367,7 @@ Translation:`;
     });
 
     // Google Translate (mock - check for API key in production)
-    const googleApiKey = import.meta.env.VITE_GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY;
+    const googleApiKey = import.meta.env.VITE_GOOGLE_TRANSLATE_API_KEY;
     providers.push({
       name: 'Google Translate',
       available: !!googleApiKey,
@@ -415,7 +417,7 @@ Translation:`;
     sourceLang: string,
     targetLang: string
   ): Promise<string> {
-    const apiKey = import.meta.env.VITE_DEEPL_API_KEY || process.env.DEEPL_API_KEY;
+    const apiKey = import.meta.env.VITE_DEEPL_API_KEY;
     
     if (!apiKey) {
       throw new Error('DeepL API key not configured');
@@ -456,7 +458,7 @@ Translation:`;
     sourceLang: string,
     targetLang: string
   ): Promise<string> {
-    const apiKey = import.meta.env.VITE_GOOGLE_TRANSLATE_API_KEY || process.env.GOOGLE_TRANSLATE_API_KEY;
+    const apiKey = import.meta.env.VITE_GOOGLE_TRANSLATE_API_KEY;
     
     if (!apiKey) {
       throw new Error('Google Translate API key not configured');

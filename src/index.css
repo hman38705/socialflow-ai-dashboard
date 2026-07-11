@@ -7,37 +7,61 @@
 }
 
 body {
-  @apply bg-[#030303] text-white;
+  @apply bg-dark-bg text-white;
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
-  font-family: 'Inter', sans-serif;
+  font-family: 'Fira Sans', system-ui, sans-serif;
   overflow-x: hidden;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Tabular, monospaced figures for all data/metrics — no layout shift, data-tool feel */
+.tnum {
+  font-family: 'Fira Code', ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: 'tnum' 1;
+  letter-spacing: -0.02em;
 }
 
 @layer components {
   .glass {
-    @apply bg-dark-surface backdrop-blur-xl border border-dark-border shadow-2xl;
-    background-image: radial-gradient(circle at top left, rgba(255, 255, 255, 0.05), transparent 40%);
+    @apply bg-dark-surface backdrop-blur-xl border border-dark-border;
+    background-image:
+      linear-gradient(135deg, rgba(255, 255, 255, 0.05) 0%, rgba(255, 255, 255, 0) 55%),
+      radial-gradient(circle at top left, rgba(255, 255, 255, 0.04), transparent 42%);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 255, 255, 0.05);
   }
-  
+
   .glass-card {
     @apply glass rounded-2xl overflow-hidden transition-all duration-300;
   }
-  
+
   .glass-card:hover {
-    @apply border-white/20 -translate-y-1;
-    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.4);
+    @apply border-white/15 -translate-y-1;
+    box-shadow: 0 24px 48px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.06);
   }
-  
+
+  /* Reusable primary CTA — signature rose→blue gradient */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 font-semibold text-white rounded-xl transition-all;
+    background-image: linear-gradient(135deg, #f43f5e 0%, #4f83ff 100%);
+    box-shadow: 0 0 24px rgba(244, 63, 94, 0.3);
+  }
+  .btn-primary:hover {
+    @apply scale-[1.03];
+    box-shadow: 0 0 32px rgba(244, 63, 94, 0.45);
+  }
+
   .glow-text {
-    @apply drop-shadow-[0_0_8px_rgba(59,130,246,0.5)];
+    @apply drop-shadow-[0_0_10px_rgba(244,63,94,0.45)];
   }
 }
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
   width: 6px;
+  height: 6px;
 }
 
 ::-webkit-scrollbar-track {
@@ -48,22 +72,42 @@ body {
   @apply bg-dark-border rounded-full hover:bg-gray-subtext/50;
 }
 
-/* Animated background glow */
+/* Animated aurora background — multi-hue depth + subtle grain */
 .bg-glow {
   position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.bg-glow::before {
+  content: '';
+  position: absolute;
   top: -50%;
   left: -50%;
   width: 200%;
   height: 200%;
-  background: radial-gradient(circle at center, #1e1b4b 0%, transparent 40%);
-  animation: rotate 60s linear infinite;
-  z-index: -1;
-  opacity: 0.3;
+  background:
+    radial-gradient(circle at 25% 20%, rgba(244, 63, 94, 0.16) 0%, transparent 32%),
+    radial-gradient(circle at 78% 30%, rgba(79, 131, 255, 0.16) 0%, transparent 34%),
+    radial-gradient(circle at 55% 82%, rgba(139, 92, 246, 0.14) 0%, transparent 36%);
+  animation: aurora 40s linear infinite;
 }
 
-@keyframes rotate {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
+/* Fine grain overlay for atmosphere/texture */
+.bg-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  opacity: 0.5;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='120'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='0.035'/%3E%3C/svg%3E");
+}
+
+@keyframes aurora {
+  from { transform: rotate(0deg) scale(1); }
+  50%  { transform: rotate(180deg) scale(1.15); }
+  to   { transform: rotate(360deg) scale(1); }
 }
 
 .layout-grid {
@@ -75,5 +119,14 @@ body {
 @media (max-width: 768px) {
   .layout-grid {
     grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-glow::before { animation: none; }
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
   }
 }
