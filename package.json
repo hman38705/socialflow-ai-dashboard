@@ -59,7 +59,7 @@
     "axios": "^1.18.1",
     "dexie": "^4.3.0",
     "fast-check": "^4.6.0",
-    "framer-motion": "^12.38.0",
+    "framer-motion": "^12.42.2",
     "lucide-react": "^0.300.0",
     "nodemailer": "^9.0.3",
     "otplib": "^13.4.0",
