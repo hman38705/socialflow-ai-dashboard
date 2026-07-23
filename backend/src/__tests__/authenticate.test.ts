@@ -154,3 +154,50 @@ describe('#616 edge cases', () => {
     expect(next).toHaveBeenCalled();
   });
 });
+
+// ─── #1102 — session validation, token expiry, and 401 response shape ────────
+
+describe('#1102 authenticate middleware', () => {
+  it('returns 401 with { message: "Unauthorized" } for missing header', async () => {
+    const res = makeRes();
+    await authenticate(makeReq(), res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Unauthorized' });
+  });
+
+  it('returns 401 for a header that does not start with "Bearer "', async () => {
+    const req = { headers: { authorization: 'Token abc' } } as AuthRequest;
+    const res = makeRes();
+    await authenticate(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Unauthorized' });
+  });
+
+  it('returns 401 for a token with wrong signature (jwt.verify fails)', async () => {
+    const token = jwt.sign({ sub: 'user-7' }, 'wrong-secret', { expiresIn: '15m' });
+    const res = makeRes();
+    await authenticate(makeReq(token), res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Unauthorized' });
+    expect(AuthBlacklistService.isBlacklisted).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 when token is within expiry window but blacklisted (session revoked)', async () => {
+    (AuthBlacklistService.isBlacklisted as jest.Mock).mockResolvedValueOnce(true);
+    const token = jwt.sign({ sub: 'user-8' }, SECRET, { expiresIn: '15m' });
+    const res = makeRes();
+    await authenticate(makeReq(token), res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(res.json).toHaveBeenCalledWith({ message: 'Unauthorized' });
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('attaches req.user.id from sub claim for a valid session token', async () => {
+    const token = jwt.sign({ sub: 'user-9' }, SECRET, { expiresIn: '15m' });
+    const req = makeReq(token);
+    const res = makeRes();
+    await authenticate(req, res, next);
+    expect(req.user).toEqual({ id: 'user-9' });
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+});
