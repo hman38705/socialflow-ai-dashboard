@@ -517,3 +517,202 @@ describe('#614 CSRF protection on /api/auth/* (integration)', () => {
     });
   });
 });
+
+// ─── #1100 — token generation, double-submit cookie validation, HTTP methods ──
+
+import crypto from 'crypto';
+
+describe('#1100 csrfProtection middleware', () => {
+  beforeEach(() => {
+    process.env.NODE_ENV = 'test';
+  });
+
+  // ── Token generation ────────────────────────────────────────────────────────
+
+  it('generates a cryptographically random session ID via crypto.randomBytes', () => {
+    const spy = jest.spyOn(crypto, 'randomBytes');
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({ headers: { origin: 'http://localhost:3000' } });
+    const { res } = makeRes();
+
+    csrfProtection(req, res, next);
+
+    expect(spy).toHaveBeenCalled();
+    spy.mockRestore();
+  });
+
+  it('sets a deterministic CSRF token when randomBytes is stubbed', () => {
+    const fixedBytes = Buffer.alloc(32, 0xab);
+    jest.spyOn(crypto, 'randomBytes').mockReturnValue(fixedBytes as any);
+
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({ headers: { origin: 'http://localhost:3000' } });
+    const { res, cookie } = makeRes();
+
+    csrfProtection(req, res, next);
+
+    const sid = cookie.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1];
+    expect(sid).toBe(fixedBytes.toString('hex'));
+
+    jest.restoreAllMocks();
+  });
+
+  // ── GET passes through without CSRF validation ──────────────────────────────
+
+  it('passes GET requests through without CSRF validation (no cookie required)', () => {
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({ method: 'GET', headers: { origin: 'http://localhost:3000' } });
+    const { res } = makeRes();
+
+    csrfProtection(req, res, next);
+
+    expect(next).toHaveBeenCalledTimes(1);
+  });
+
+  // ── POST/PUT/DELETE with matching cookie+header pass through ────────────────
+
+  it('allows POST with matching csrf_sid and csrf_token (double-submit)', () => {
+    // Establish session first
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ method: 'POST', headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookie1.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1] as string;
+    const token = cookie1.mock.calls.find((c) => c[0] === 'csrf_token')?.[1] as string;
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const second = makeReq({
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=${sid}; csrf_token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+    const { res: res2 } = makeRes();
+
+    csrfProtection(second, res2, next2);
+
+    expect(next2).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows PUT with matching double-submit tokens', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ method: 'PUT', headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookie1.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1] as string;
+    const token = cookie1.mock.calls.find((c) => c[0] === 'csrf_token')?.[1] as string;
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const second = makeReq({
+      method: 'PUT',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=${sid}; csrf_token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+    const { res: res2 } = makeRes();
+    csrfProtection(second, res2, next2);
+
+    expect(next2).toHaveBeenCalledTimes(1);
+  });
+
+  it('allows DELETE with matching double-submit tokens', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ method: 'DELETE', headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookie1.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1] as string;
+    const token = cookie1.mock.calls.find((c) => c[0] === 'csrf_token')?.[1] as string;
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const second = makeReq({
+      method: 'DELETE',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=${sid}; csrf_token=${token}`,
+        'x-csrf-token': token,
+      },
+    });
+    const { res: res2 } = makeRes();
+    csrfProtection(second, res2, next2);
+
+    expect(next2).toHaveBeenCalledTimes(1);
+  });
+
+  // ── Mismatched token → 403 ──────────────────────────────────────────────────
+
+  it('rejects POST with mismatched csrf_token with 403', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ method: 'POST', headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookie1.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1] as string;
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const attacker = makeReq({
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=${sid}; csrf_token=wrong-token`,
+        'x-csrf-token': 'wrong-token',
+      },
+    });
+    const { res: res2, status, json } = makeRes();
+    csrfProtection(attacker, res2, next2);
+
+    expect(next2).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(403);
+    expect(json).toHaveBeenCalledWith({ message: 'CSRF check failed: token not bound to session' });
+  });
+
+  // ── Missing CSRF cookie → 403 ───────────────────────────────────────────────
+
+  it('rejects POST with csrf_token cookie but no csrf_sid cookie with 403', () => {
+    const next = jest.fn() as unknown as NextFunction;
+    const req = makeReq({
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: 'csrf_token=some-token',
+      },
+    });
+    const { res, status } = makeRes();
+    csrfProtection(req, res, next);
+
+    expect(next).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(403);
+  });
+
+  // ── Missing CSRF header → falls back to cookie comparison ──────────────────
+
+  it('rejects POST when x-csrf-token header is absent and cookie token is wrong', () => {
+    const next1 = jest.fn() as unknown as NextFunction;
+    const first = makeReq({ method: 'POST', headers: { origin: 'http://localhost:3000' } });
+    const { res: res1, cookie: cookie1 } = makeRes();
+    csrfProtection(first, res1, next1);
+
+    const sid = cookie1.mock.calls.find((c) => c[0] === 'csrf_sid')?.[1] as string;
+
+    const next2 = jest.fn() as unknown as NextFunction;
+    const req = makeReq({
+      method: 'POST',
+      headers: {
+        origin: 'http://localhost:3000',
+        cookie: `csrf_sid=${sid}; csrf_token=tampered`,
+        // no x-csrf-token header
+      },
+    });
+    const { res: res2, status } = makeRes();
+    csrfProtection(req, res2, next2);
+
+    expect(next2).not.toHaveBeenCalled();
+    expect(status).toHaveBeenCalledWith(403);
+  });
+});

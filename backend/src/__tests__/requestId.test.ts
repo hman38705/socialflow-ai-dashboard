@@ -326,3 +326,43 @@ describe('getRequestId() outside request context', () => {
     expect(requestId).toBeUndefined();
   });
 });
+
+// ─── #1101 — UUID generation, X-Request-ID header injection, logger context ──
+
+describe('#1101 requestIdMiddleware', () => {
+  it('generates a UUID-shaped request ID and sets it on req', async () => {
+    const response = await request(createTestApp()).get('/test');
+    expect(response.body.requestId).toMatch(UUID_V4_REGEX);
+  });
+
+  it('sets X-Request-Id response header with the same ID as req.requestId', async () => {
+    const response = await request(createTestApp()).get('/test');
+    expect(response.headers['x-request-id']).toBe(response.body.requestId);
+  });
+
+  it('uses client-supplied X-Request-Id when it is a valid UUID v4', async () => {
+    const id = 'a3bb189e-8bf9-4c8b-9bea-a9d6b6e7d9f4';
+    const response = await request(createTestApp()).get('/test').set('X-Request-Id', id);
+    expect(response.headers['x-request-id']).toBe(id);
+    expect(response.body.requestId).toBe(id);
+  });
+
+  it('generates a new UUID when client-supplied X-Request-Id is not a valid UUID v4', async () => {
+    const response = await request(createTestApp()).get('/test').set('X-Request-Id', 'not-a-uuid');
+    expect(response.headers['x-request-id']).toMatch(UUID_V4_REGEX);
+    expect(response.headers['x-request-id']).not.toBe('not-a-uuid');
+  });
+
+  it('binds request ID to logger context (getRequestId() returns same ID inside handler)', async () => {
+    const response = await request(createTestApp()).get('/test');
+    // contextRequestId is populated via getRequestId() inside the route handler,
+    // proving the ID is bound to AsyncLocalStorage (logger context).
+    expect(response.body.contextRequestId).toBe(response.headers['x-request-id']);
+  });
+
+  it('always calls next() after setup', async () => {
+    // A 200 response from the test route proves next() was called.
+    const response = await request(createTestApp()).get('/test');
+    expect(response.status).toBe(200);
+  });
+});
