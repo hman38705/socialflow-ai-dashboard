@@ -95,7 +95,7 @@
     "@types/morgan": "^1.9.9",
     "@types/multer": "^2.2.0",
     "@types/nock": "^10.0.3",
-    "@types/node": "^20.12.7",
+    "@types/node": "^26.1.2",
     "@types/redlock": "^4.0.8",
     "@types/supertest": "^7.2.0",
     "@types/swagger-jsdoc": "^6.0.4",
