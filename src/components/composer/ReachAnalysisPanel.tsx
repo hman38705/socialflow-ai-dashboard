@@ -196,7 +196,6 @@ export const ReachAnalysisPanel: React.FC<ReachAnalysisPanelProps> = ({
     const currentHour = draft.scheduledTime ? new Date(draft.scheduledTime).getHours() : -1;
     const isOptimalTime = currentHour === 10 || currentHour === 14 || currentHour === 18;
     if (!draft.scheduledTime || !isOptimalTime) {
-      const optimal = prediction?.optimalPostTime || new Date(Date.now() + 86400000);
       list.push({
         id: 'better_time',
         title: 'Schedule at peak audience window',
@@ -265,14 +264,6 @@ export const ReachAnalysisPanel: React.FC<ReachAnalysisPanelProps> = ({
       setInternalPublishing(false);
     }
   };
-
-  const currentScore = prediction?.reachScore ?? 0;
-  const scoreBadgeColor =
-    currentScore >= 75
-      ? 'text-emerald-400 bg-emerald-500/10 border-emerald-500/30'
-      : currentScore >= 50
-        ? 'text-primary-blue bg-primary-blue/10 border-primary-blue/30'
-        : 'text-amber-400 bg-amber-500/10 border-amber-500/30';
 
   const publishingState = isPublishing || internalPublishing;
 
@@ -598,12 +589,16 @@ export const ReachAnalysisPanel: React.FC<ReachAnalysisPanelProps> = ({
                             <button
                               type="button"
                               onClick={suggestion.apply}
-                              className="px-3 py-1.5 rounded-lg bg-primary-blue/15 hover:bg-primary-blue text-primary-blue hover:text-white border border-primary-blue/30 text-xs font-bold transition-all flex items-center gap-1.5"
+                              className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 border ${
+                                isApplied
+                                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40 shadow-sm'
+                                  : 'bg-primary-blue/15 hover:bg-primary-blue text-primary-blue hover:text-white border-primary-blue/30'
+                              }`}
                             >
                               <span className="material-symbols-outlined text-sm">
-                                auto_fix_high
+                                {isApplied ? 'check' : 'auto_fix_high'}
                               </span>
-                              Apply Suggestion
+                              {isApplied ? 'Applied ✓' : 'Apply Suggestion'}
                             </button>
                           </div>
                         </div>
