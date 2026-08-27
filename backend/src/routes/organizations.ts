@@ -8,6 +8,8 @@ import {
   addMember,
   removeMember,
   switchOrganization,
+  updateMemberRole,
+  updateOrganization,
 } from '../controllers/organization';
 
 const router = Router();
@@ -100,6 +102,47 @@ router.get('/:orgId', getOrganization);
 
 /**
  * @openapi
+ * /organizations/{orgId}:
+ *   patch:
+ *     tags: [Organizations]
+ *     summary: Update organization settings (name/slug)
+ *     parameters:
+ *       - in: path
+ *         name: orgId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             properties:
+ *               name: { type: string }
+ *               slug: { type: string }
+ *     responses:
+ *       200:
+ *         description: Organization updated
+ *       403:
+ *         description: Insufficient permissions
+ *       409:
+ *         description: Slug already taken
+ */
+router.patch(
+  '/:orgId',
+  audit(
+    'org:settings:update',
+    'organization',
+    (req) => req.params.orgId,
+    (req) => req.body,
+  ),
+  updateOrganization,
+);
+
+/**
+ * @openapi
  * /organizations/{orgId}/members:
  *   post:
  *     tags: [Organizations]
@@ -171,6 +214,53 @@ router.delete(
     (req) => ({ orgId: req.params.orgId }),
   ),
   removeMember,
+);
+
+/**
+ * @openapi
+ * /organizations/{orgId}/members/{userId}:
+ *   patch:
+ *     tags: [Organizations]
+ *     summary: Change a member's role
+ *     parameters:
+ *       - in: path
+ *         name: orgId
+ *         required: true
+ *         schema:
+ *           type: string
+ *           format: uuid
+ *       - in: path
+ *         name: userId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required: [role]
+ *             properties:
+ *               role:
+ *                 type: string
+ *     responses:
+ *       200:
+ *         description: Role updated
+ *       403:
+ *         description: Insufficient permissions or would remove the last owner
+ *       404:
+ *         description: Not found
+ */
+router.patch(
+  '/:orgId/members/:userId',
+  audit(
+    'org:member:role_change',
+    'organization-member',
+    (req) => req.params.userId,
+    (req) => ({ orgId: req.params.orgId, role: req.body?.role }),
+  ),
+  updateMemberRole,
 );
 
 export default router;
