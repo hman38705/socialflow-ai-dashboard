@@ -16,6 +16,7 @@ const navItems: NavItem[] = [
   { id: View.CALENDAR, label: 'Calendar', icon: <MaterialIcon name="calendar_today" /> },
   { id: View.CREATE_POST, label: 'Create Post', icon: <MaterialIcon name="edit_square" /> },
   { id: View.MEDIA_LIBRARY, label: 'Media', icon: <MaterialIcon name="photo_library" /> },
+  { id: View.VIDEO_JOBS, label: 'Video Jobs', icon: <MaterialIcon name="movie" /> },
   { id: View.INBOX, label: 'Inbox', icon: <MaterialIcon name="inbox" /> },
   { id: View.SETTINGS, label: 'Settings', icon: <MaterialIcon name="settings" /> },
 ];

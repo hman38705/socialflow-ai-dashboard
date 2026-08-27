@@ -5,7 +5,8 @@ export enum View {
   CREATE_POST = 'CREATE_POST',
   MEDIA_LIBRARY = 'MEDIA_LIBRARY',
   INBOX = 'INBOX',
-  SETTINGS = 'SETTINGS'
+  SETTINGS = 'SETTINGS',
+  VIDEO_JOBS = 'VIDEO_JOBS'
 }
 
 export interface NavItem {
