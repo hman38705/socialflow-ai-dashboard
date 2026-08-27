@@ -73,7 +73,7 @@ export const ReachScoreWidget: React.FC<ReachScoreWidgetProps> = ({ postData, on
         <h3 className="text-sm font-medium text-gray-subtext mb-4">Predicted Reach Score</h3>
         <div className="relative inline-flex items-center justify-center">
           <svg className="w-32 h-32 transform -rotate-90">
-            <circle
+            <circle role="meter" aria-label="Predicted reach score" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(prediction.reachScore)}
               cx="64"
               cy="64"
               r="56"
@@ -106,9 +106,10 @@ export const ReachScoreWidget: React.FC<ReachScoreWidgetProps> = ({ postData, on
             <span className="text-xs text-gray-subtext">/ 100</span>
           </div>
         </div>
-        <p className="text-sm text-gray-subtext mt-2">
+        <p className="text-sm text-gray-subtext mt-2" title="Confidence interval for this prediction">
           Confidence: {Math.round(prediction.confidence * 100)}%
         </p>
+        <p className="text-xs text-gray-subtext">{prediction.reachScore < 33 ? 'Low' : prediction.reachScore < 66 ? 'Moderate' : 'Strong'} reach potential</p>
       </div>
 
       {/* Estimated Reach */}

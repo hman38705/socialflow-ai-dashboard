@@ -1,9 +1,10 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { predictiveService } from '../services/PredictiveService';
 import { PostAnalysisInput, ReachPrediction } from '../types/predictive';
 
 interface UsePredictiveReachOptions {
   autoAnalyze?: boolean;
+  enabled?: boolean;
   debounceMs?: number;
 }
 
@@ -11,14 +12,16 @@ export function usePredictiveReach(
   postData: PostAnalysisInput,
   options: UsePredictiveReachOptions = {}
 ) {
-  const { autoAnalyze = true, debounceMs = 500 } = options;
+  const { autoAnalyze = true, enabled = true, debounceMs = 600 } = options;
+  const mounted = useRef(true);
+  useEffect(() => () => { mounted.current = false; }, []);
   
   const [prediction, setPrediction] = useState<ReachPrediction | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const analyze = useCallback(async () => {
-    if (!postData.content || postData.content.length < 3) {
+    if (!enabled || !postData.content || postData.content.length < 3) {
       setPrediction(null);
       return;
     }
@@ -28,25 +31,25 @@ export function usePredictiveReach(
 
     try {
       const result = await predictiveService.predictReach(postData);
-      setPrediction(result);
+      if (mounted.current) setPrediction(result);
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Failed to analyze reach';
-      setError(errorMessage);
+      if (mounted.current) setError(errorMessage);
       console.error('Reach prediction error:', err);
     } finally {
-      setLoading(false);
+      if (mounted.current) setLoading(false);
     }
-  }, [postData]);
+  }, [postData, enabled]);
 
   useEffect(() => {
-    if (!autoAnalyze) return;
+    if (!autoAnalyze || !enabled) return;
 
     const timer = setTimeout(() => {
       analyze();
     }, debounceMs);
 
     return () => clearTimeout(timer);
-  }, [postData.content, postData.platform, postData.scheduledTime, autoAnalyze, debounceMs, analyze]);
+  }, [postData.content, postData.platform, postData.scheduledTime, autoAnalyze, enabled, debounceMs, analyze]);
 
   const refresh = useCallback(() => {
     analyze();
