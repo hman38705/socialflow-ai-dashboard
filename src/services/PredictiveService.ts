@@ -13,8 +13,15 @@ import {
 } from '../types/predictive';
 
 class PredictiveService {
-  public async predictReach(input: PostAnalysisInput): Promise<ReachPrediction> {
-    return request(OpenAPI, {
+  private readonly cache = new Map<string, Promise<ReachPrediction>>();
+  private active?: ReturnType<typeof request>;
+
+  public predictReach(input: PostAnalysisInput): Promise<ReachPrediction> {
+    const key = JSON.stringify({ ...input, scheduledTime: input.scheduledTime?.toISOString() });
+    const cached = this.cache.get(key);
+    if (cached) return cached;
+    this.active?.cancel();
+    const pending = request<ReachPrediction>(OpenAPI, {
       method: 'POST',
       url: '/predictive/reach',
       body: {
@@ -22,6 +29,10 @@ class PredictiveService {
         scheduledTime: input.scheduledTime?.toISOString(),
       },
     });
+    this.active = pending;
+    const result = pending.catch(error => { this.cache.delete(key); throw error; });
+    this.cache.set(key, result);
+    return result;
   }
 
   public async getModelMetrics(postId: string): Promise<{ metrics: MLModelMetrics }> {

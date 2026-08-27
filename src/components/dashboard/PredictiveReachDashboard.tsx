@@ -5,6 +5,7 @@ import { PostAnalysisInput, ReachPrediction, MLModelMetrics } from '../../types/
 import { GlassCard } from '../ui/GlassCard';
 import { StatBadge } from '../ui/StatBadge';
 import { analyticsService, PostAnalytics } from '../../services/AnalyticsService';
+import { ExportMenu } from '../analytics/ExportMenu';
 
 const MaterialIcon = ({ name, className }: { name: string; className?: string }) => (
   <span className={`material-symbols-outlined ${className}`}>{name}</span>
@@ -23,6 +24,7 @@ export const PredictiveReachDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [analytics, setAnalytics] = useState<PostAnalytics[]>([]);
+  const [error, setError] = useState('');
   const [modelMetrics, setModelMetrics] = useState<MLModelMetrics>({
     accuracy: 0.94,
     sampleSize: 12450,
@@ -42,6 +44,7 @@ export const PredictiveReachDashboard: React.FC = () => {
         setAnalytics(historicalAnalytics);
       } catch (error) {
         console.error('[Dashboard] Init failed:', error);
+        setError('Analytics are unavailable. Please try again later.');
       } finally {
         setLoading(false);
       }
@@ -91,24 +94,8 @@ export const PredictiveReachDashboard: React.FC = () => {
 
       setPredictions(postsWithPredictions);
     } catch (error) {
-      console.warn('[Dashboard] API is unavailable — using high-fidelity mock data fallback');
-      // Set some "smart" mock results if backend is unreachable
-      const mockResults = [88, 72, 45].map(score => ({
-        reachScore: score,
-        confidence: 0.92,
-        estimatedReach: { min: score * 1000, max: score * 2500, expected: score * 1800 },
-        recommendations: ['Optimize thumbnail', 'Use more hashtags']
-      }));
-      
-      setPredictions([
-        {
-          id: 'mock-1',
-          content: 'Sample post content for offline mode...',
-          platform: 'instagram',
-          scheduledTime: new Date(),
-          prediction: mockResults[0] as any
-        }
-      ]);
+      console.error('[Dashboard] Predictions unavailable:', error);
+      setError('Predictions are unavailable. Please try again later.');
     }
   };
 
@@ -138,7 +125,7 @@ export const PredictiveReachDashboard: React.FC = () => {
     return (
       <div className="flex flex-col items-center justify-center py-32 space-y-4 text-center">
         <span className="material-symbols-outlined text-6xl text-gray-600">bar_chart</span>
-        <h3 className="text-xl font-bold text-white">No post history yet</h3>
+        <h3 className="text-xl font-bold text-white">{error || 'No post history yet'}</h3>
         <p className="text-gray-subtext text-sm max-w-xs">
           Once you start publishing posts, your reach predictions and analytics will appear here.
         </p>
@@ -186,6 +173,7 @@ export const PredictiveReachDashboard: React.FC = () => {
           <div className="flex items-center justify-between px-2">
             <div className="flex items-center gap-3">
                <h3 className="text-xl font-bold text-white tracking-tight">Active Reach Predictions</h3>
+               <ExportMenu rows={analytics} />
                <span className="flex items-center gap-1.2 px-2 py-0.5 rounded-full bg-green-500/10 text-[9px] text-green-400 font-bold uppercase tracking-widest">
                   <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" />
                   Live Sync
