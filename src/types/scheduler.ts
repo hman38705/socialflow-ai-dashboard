@@ -18,3 +18,17 @@ export interface Conflict {
   message: string;
   conflictingPostIds: string[];
 }
+
+export interface PostingSlot {
+  id: string;
+  day: number;
+  time: string;
+  platform: string;
+}
+
+export interface PostingScheduleProps {
+  slots: PostingSlot[];
+  onChange: (slots: PostingSlot[]) => void;
+  minGapMinutes: number;
+  platforms: string[];
+}
