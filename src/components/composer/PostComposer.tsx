@@ -7,6 +7,7 @@ import {
   type ComposerMediaType,
 } from '../../contexts/ComposerContext';
 import type { PostAnalysisInput } from '../../types/predictive';
+import { PlatformPreview } from './PlatformPreview';
 
 export type ComposerPlatformId = PostAnalysisInput['platform'];
 
@@ -331,7 +332,8 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
           </button>
         </div>
 
-        <div className="flex-1 space-y-6 px-6 py-6 md:px-8">
+        <div className="flex-1 gap-8 px-6 py-6 md:px-8 lg:grid lg:grid-cols-5">
+        <div className="space-y-6 lg:col-span-3">
           <div>
             <label className="text-[11px] font-bold uppercase tracking-widest text-gray-subtext">
               Platforms
@@ -548,6 +550,16 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
               ))}
             </div>
           )}
+        </div>
+
+        <div className="mt-6 lg:col-span-2 lg:mt-0">
+          <label className="text-[11px] font-bold uppercase tracking-widest text-gray-subtext">
+            Preview
+          </label>
+          <div className="mt-2">
+            <PlatformPreview draft={draft} />
+          </div>
+        </div>
         </div>
 
         <div className="flex flex-col-reverse items-stretch justify-end gap-3 border-t border-dark-border px-6 py-5 md:flex-row md:items-center md:px-8 md:py-6">
