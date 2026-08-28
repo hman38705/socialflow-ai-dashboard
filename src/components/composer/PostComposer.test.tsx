@@ -1,5 +1,5 @@
 import React from 'react';
-import { render, screen, act, fireEvent } from '@testing-library/react';
+import { render, screen, act, fireEvent, within } from '@testing-library/react';
 import '@testing-library/jest-dom';
 import { ComposerProvider, useComposer } from '../../contexts/ComposerContext';
 import { PostComposer, validateComposerDraft, effectiveContentFor } from './PostComposer';
@@ -151,6 +151,25 @@ describe('PostComposer', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Keep editing' }));
     expect(screen.queryByRole('alertdialog')).not.toBeInTheDocument();
     expect(screen.getByRole('dialog')).toBeInTheDocument();
+  });
+
+  test('typing "#" opens a keyboard-navigable hashtag suggestion list', async () => {
+    renderComposer();
+    fireEvent.click(screen.getByRole('button', { name: 'X' }));
+    const textarea = screen.getByPlaceholderText(/Write your caption/);
+
+    fireEvent.change(textarea, { target: { value: 'Launching soon #' } });
+    textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+
+    const listbox = await screen.findByRole('listbox', { name: 'Hashtag suggestions' });
+    const options = within(listbox).getAllByRole('option');
+    expect(options.length).toBeGreaterThan(0);
+
+    fireEvent.keyDown(textarea, { key: 'ArrowDown' });
+    fireEvent.keyDown(textarea, { key: 'Enter' });
+
+    expect(screen.queryByRole('listbox', { name: 'Hashtag suggestions' })).not.toBeInTheDocument();
+    expect((textarea as HTMLTextAreaElement).value).toMatch(/^Launching soon #\S+ $/);
   });
 
   test('Escape triggers the same dirty-close confirmation flow', () => {

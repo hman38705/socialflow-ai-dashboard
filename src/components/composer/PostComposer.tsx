@@ -8,6 +8,7 @@ import {
 } from '../../contexts/ComposerContext';
 import type { PostAnalysisInput } from '../../types/predictive';
 import { PlatformPreview } from './PlatformPreview';
+import { suggestHashtags } from '../../lib/hashtags';
 
 export type ComposerPlatformId = PostAnalysisInput['platform'];
 
@@ -151,6 +152,11 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
   const [scheduledTime, setScheduledTime] = useState('10:00');
   const [isDragActive, setIsDragActive] = useState(false);
   const [issues, setIssues] = useState<ComposerValidationIssue[]>([]);
+  // Inline "#" hashtag autocomplete: the partial tag under the caret (null when not typing
+  // one), the matching suggestions, and which one is keyboard-highlighted.
+  const [hashtagQuery, setHashtagQuery] = useState<string | null>(null);
+  const [hashtagSuggestions, setHashtagSuggestions] = useState<string[]>([]);
+  const [hashtagActiveIndex, setHashtagActiveIndex] = useState(0);
 
   const dialogRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -217,6 +223,26 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isOpen]);
 
+  // Fetches hashtag suggestions (AiService-backed when available, offline fallback otherwise)
+  // whenever the in-progress "#partial" query changes.
+  useEffect(() => {
+    if (hashtagQuery === null) {
+      setHashtagSuggestions([]);
+      return;
+    }
+    let cancelled = false;
+    suggestHashtags(hashtagQuery.length > 0 ? hashtagQuery : draft.content, 6).then((results) => {
+      if (!cancelled) {
+        setHashtagSuggestions(results);
+        setHashtagActiveIndex(0);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hashtagQuery]);
+
   const activeConfig = activePlatform ? PLATFORM_CONFIG[activePlatform] : null;
   const activeContent = activePlatform ? effectiveContentFor(draft, activePlatform) : draft.content;
   const hasOverride = activePlatform ? Boolean(draft.platformOverrides[activePlatform]?.trim()) : false;
@@ -233,6 +259,32 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
     const isSelected = draft.platforms.includes(id);
     updateDraft({
       platforms: isSelected ? draft.platforms.filter((p) => p !== id) : [...draft.platforms, id],
+    });
+  };
+
+  // Detects a `#partial` hashtag immediately before the caret, e.g. "hello #lau|" -> "lau".
+  const detectHashtagQuery = (value: string, caret: number): string | null => {
+    const upToCaret = value.slice(0, caret);
+    const match = upToCaret.match(/#([\p{L}\p{N}_]*)$/u);
+    return match ? match[1] : null;
+  };
+
+  const selectHashtagSuggestion = (tag: string) => {
+    const textarea = textareaRef.current;
+    const value = activeContent;
+    const caret = textarea?.selectionStart ?? value.length;
+    const upToCaret = value.slice(0, caret);
+    const match = upToCaret.match(/#([\p{L}\p{N}_]*)$/u);
+    if (!match) return;
+    const start = caret - match[0].length;
+    const inserted = tag.startsWith('#') ? tag : `#${tag}`;
+    const next = `${value.slice(0, start)}${inserted} ${value.slice(caret)}`;
+    updateActiveContent(next);
+    setHashtagQuery(null);
+    requestAnimationFrame(() => {
+      const newCaret = start + inserted.length + 1;
+      textarea?.focus();
+      textarea?.setSelectionRange(newCaret, newCaret);
     });
   };
 
@@ -435,14 +487,71 @@ export const PostComposer: React.FC<PostComposerProps> = ({ onSchedule, onPublis
               <textarea
                 ref={textareaRef}
                 value={activeContent}
-                onChange={(event) => updateActiveContent(event.target.value)}
+                onChange={(event) => {
+                  updateActiveContent(event.target.value);
+                  setHashtagQuery(detectHashtagQuery(event.target.value, event.target.selectionStart ?? event.target.value.length));
+                }}
+                onKeyDown={(event) => {
+                  if (hashtagQuery === null || hashtagSuggestions.length === 0) return;
+                  if (event.key === 'ArrowDown') {
+                    event.preventDefault();
+                    setHashtagActiveIndex((i) => (i + 1) % hashtagSuggestions.length);
+                  } else if (event.key === 'ArrowUp') {
+                    event.preventDefault();
+                    setHashtagActiveIndex((i) => (i - 1 + hashtagSuggestions.length) % hashtagSuggestions.length);
+                  } else if (event.key === 'Enter' || event.key === 'Tab') {
+                    event.preventDefault();
+                    // Stop the native event from also reaching the modal's document-level
+                    // keydown listener (which treats plain Enter as unrelated, but this keeps
+                    // Tab from shifting focus while a suggestion is being chosen).
+                    event.nativeEvent.stopPropagation();
+                    selectHashtagSuggestion(hashtagSuggestions[hashtagActiveIndex]);
+                  } else if (event.key === 'Escape') {
+                    // Dismiss the suggestion dropdown first; only a second Escape (once this
+                    // branch no longer applies) reaches the modal's own close handler.
+                    event.preventDefault();
+                    event.nativeEvent.stopPropagation();
+                    setHashtagQuery(null);
+                  }
+                }}
                 onScroll={(event) => {
                   if (highlightRef.current) highlightRef.current.scrollTop = event.currentTarget.scrollTop;
                 }}
                 placeholder="Write your caption… use #hashtags and @mentions"
                 rows={6}
+                role="combobox"
+                aria-expanded={hashtagQuery !== null && hashtagSuggestions.length > 0}
+                aria-controls="hashtag-suggestions"
                 className="relative w-full resize-none rounded-2xl border border-dark-border bg-dark-bg/60 px-4 py-3 text-sm text-white caret-white placeholder:text-gray-600 focus:border-primary-blue/50 focus:outline-none"
               />
+
+              {hashtagQuery !== null && hashtagSuggestions.length > 0 && (
+                <ul
+                  id="hashtag-suggestions"
+                  role="listbox"
+                  aria-label="Hashtag suggestions"
+                  className="absolute z-20 mt-1 w-full max-w-xs rounded-xl border border-dark-border bg-dark-elev shadow-elev-2"
+                >
+                  {hashtagSuggestions.map((tag, index) => (
+                    <li key={tag} role="option" aria-selected={index === hashtagActiveIndex}>
+                      <button
+                        type="button"
+                        onMouseDown={(event) => {
+                          // Use mousedown (fires before the textarea's blur) so the click registers.
+                          event.preventDefault();
+                          selectHashtagSuggestion(tag);
+                        }}
+                        onMouseEnter={() => setHashtagActiveIndex(index)}
+                        className={`block w-full px-3 py-2 text-left text-xs font-semibold ${
+                          index === hashtagActiveIndex ? 'bg-primary-blue/20 text-primary-blue' : 'text-gray-300'
+                        }`}
+                      >
+                        {tag.startsWith('#') ? tag : `#${tag}`}
+                      </button>
+                    </li>
+                  ))}
+                </ul>
+              )}
             </div>
             <div className="mt-1 flex items-center justify-between text-[11px] text-gray-subtext">
               <span>{hasOverride ? `Custom copy for ${activeConfig?.label}` : 'Shared across all selected platforms'}</span>
