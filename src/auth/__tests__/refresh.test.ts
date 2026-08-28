@@ -15,7 +15,6 @@ import {
   refreshTokens,
   withRefreshInterceptor,
   setTokens,
-  clearTokens,
   getAccessToken,
   getRefreshToken,
   scheduleProactiveRefresh,
