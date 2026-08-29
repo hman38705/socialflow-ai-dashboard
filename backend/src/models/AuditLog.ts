@@ -19,6 +19,7 @@ export type AuditAction =
   | 'org:settings:update'
   | 'org:member:invite'
   | 'org:member:remove'
+  | 'org:member:role_change'
   // Roles
   | 'role:assign'
   | 'role:revoke'
