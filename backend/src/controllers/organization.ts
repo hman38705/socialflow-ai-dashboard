@@ -1,9 +1,10 @@
 import { Response } from 'express';
 import { randomUUID } from 'crypto';
 import { prisma } from '../lib/prisma';
-import { AuthRequest } from '../middleware/authMiddleware';
+import { AuthRequest } from '../middleware/authenticate';
 import { parsePageLimit, toSkipTake, buildPageResponse } from '../utils/pagination';
-import { withCache, invalidateCache, invalidateCachePattern, CacheTTL } from '../utils/cache';
+import { withCache, invalidateCachePattern, CacheTTL } from '../utils/cache';
+import { UserStore } from '../models/User';
 
 /** POST /api/organizations — create a new org, caller becomes owner */
 export async function createOrganization(req: AuthRequest, res: Response): Promise<void> {
@@ -82,10 +83,18 @@ export async function getOrganization(req: AuthRequest, res: Response): Promise<
   res.json({ ...membership.organization, role: membership.role });
 }
 
-/** POST /api/organizations/:orgId/members — invite a user by userId */
+/** POST /api/organizations/:orgId/members — invite a user by userId or email */
 export async function addMember(req: AuthRequest, res: Response): Promise<void> {
   const { orgId } = req.params;
-  const { userId, role = 'member' } = req.body as { userId: string; role?: string };
+  const {
+    userId: bodyUserId,
+    email,
+    role = 'member',
+  } = req.body as {
+    userId?: string;
+    email?: string;
+    role?: string;
+  };
 
   // Only owner/admin can invite
   const callerMembership = await prisma.organizationMember.findUnique({
@@ -104,6 +113,28 @@ export async function addMember(req: AuthRequest, res: Response): Promise<void> 
     return;
   }
 
+  let userId = bodyUserId;
+  if (!userId && email) {
+    const user = await UserStore.findByEmail(email);
+    if (!user) {
+      res.status(404).json({ message: 'No user found with that email' });
+      return;
+    }
+    userId = user.id;
+  }
+  if (!userId) {
+    res.status(400).json({ message: 'userId or email is required' });
+    return;
+  }
+
+  const existingMember = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+  });
+  if (existingMember) {
+    res.status(409).json({ message: 'User is already a member of this organization' });
+    return;
+  }
+
   const member = await prisma.organizationMember.create({
     data: { id: randomUUID(), organizationId: orgId, userId, role },
   });
@@ -115,6 +146,94 @@ export async function addMember(req: AuthRequest, res: Response): Promise<void> 
   ]);
 
   res.status(201).json(member);
+}
+
+/** PATCH /api/organizations/:orgId/members/:userId — change a member's role */
+export async function updateMemberRole(req: AuthRequest, res: Response): Promise<void> {
+  const { orgId, userId } = req.params;
+  const { role } = req.body as { role: string };
+
+  const callerMembership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
+  });
+  if (!callerMembership || !['owner', 'admin'].includes(callerMembership.role)) {
+    res.status(403).json({ message: 'Insufficient permissions' });
+    return;
+  }
+
+  const targetMembership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+  });
+  if (!targetMembership) {
+    res.status(404).json({ message: 'Member not found' });
+    return;
+  }
+
+  // Only an existing owner can grant or revoke the owner role (same rationale as addMember).
+  if (
+    (role === 'owner' || targetMembership.role === 'owner') &&
+    callerMembership.role !== 'owner'
+  ) {
+    res.status(403).json({ message: 'Only an owner can change an owner-level role' });
+    return;
+  }
+
+  // Never let the org end up without an owner.
+  if (targetMembership.role === 'owner' && role !== 'owner') {
+    const ownerCount = await prisma.organizationMember.count({
+      where: { organizationId: orgId, role: 'owner' },
+    });
+    if (ownerCount <= 1) {
+      res.status(403).json({ message: 'Cannot demote the last owner of an organization' });
+      return;
+    }
+  }
+
+  const updated = await prisma.organizationMember.update({
+    where: { organizationId_userId: { organizationId: orgId, userId } },
+    data: { role },
+  });
+
+  await Promise.all([
+    invalidateCachePattern(`org:${orgId}:*`),
+    invalidateCachePattern(`org-list:${userId}:*`),
+  ]);
+
+  res.json(updated);
+}
+
+/** PATCH /api/organizations/:orgId — update organization settings (name/slug) */
+export async function updateOrganization(req: AuthRequest, res: Response): Promise<void> {
+  const { orgId } = req.params;
+  const { name, slug } = req.body as { name?: string; slug?: string };
+
+  const callerMembership = await prisma.organizationMember.findUnique({
+    where: { organizationId_userId: { organizationId: orgId, userId: req.user!.id } },
+  });
+  if (!callerMembership || !['owner', 'admin'].includes(callerMembership.role)) {
+    res.status(403).json({ message: 'Insufficient permissions' });
+    return;
+  }
+
+  if (slug) {
+    const existing = await prisma.organization.findUnique({ where: { slug } });
+    if (existing && existing.id !== orgId) {
+      res.status(409).json({ message: 'Slug already taken' });
+      return;
+    }
+  }
+
+  const updated = await prisma.organization.update({
+    where: { id: orgId },
+    data: { ...(name ? { name } : {}), ...(slug ? { slug } : {}) },
+  });
+
+  await Promise.all([
+    invalidateCachePattern(`org:${orgId}:*`),
+    invalidateCachePattern(`org-list:${req.user!.id}:*`),
+  ]);
+
+  res.json(updated);
 }
 
 /** DELETE /api/organizations/:orgId/members/:userId — remove a member */
