@@ -8,6 +8,9 @@ import {
 } from '../types/predictive';
 
 class PredictiveService {
+  /** De-duplicates concurrent/repeat predictions for identical input (from #1511). */
+  private readonly inFlight = new Map<string, Promise<ReachPrediction>>();
+
   /**
    * Deterministic, offline-safe reach estimate.
    */
@@ -114,7 +117,22 @@ class PredictiveService {
     };
   }
 
-  public async predictReach(input: PostAnalysisInput): Promise<ReachPrediction> {
+  public predictReach(input: PostAnalysisInput): Promise<ReachPrediction> {
+    const key = JSON.stringify({
+      ...input,
+      scheduledTime: input.scheduledTime ? new Date(input.scheduledTime).toISOString() : undefined,
+    });
+    const cached = this.inFlight.get(key);
+    if (cached) return cached;
+
+    const pending = this.fetchPrediction(input).finally(() => {
+      this.inFlight.delete(key);
+    });
+    this.inFlight.set(key, pending);
+    return pending;
+  }
+
+  private async fetchPrediction(input: PostAnalysisInput): Promise<ReachPrediction> {
     try {
       const response = await request<
         { success?: boolean; data?: ReachPrediction } & ReachPrediction
