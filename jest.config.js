@@ -1,28 +1,9 @@
 /** @type {import('jest').Config} */
+// Frontend tests moved to Vitest (FE-005); the Jest "frontend" project that
+// used to point at src/**/*.test.ts was removed here as part of FE-124 so no
+// CI step or local `npm run test:*` silently no-ops against a deleted
+// config. Run `npm run test:run` (Vitest) for frontend, and this file for
+// backend only.
 module.exports = {
-  projects: [
-    {
-      displayName: 'frontend',
-      preset: 'ts-jest',
-      testEnvironment: 'jsdom',
-      roots: ['<rootDir>/src'],
-      testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx', '**/*.test.ts', '**/*.test.tsx'],
-      setupFiles: ['<rootDir>/jest.setup.js'],
-      transformIgnorePatterns: [
-        'node_modules/(?!(@scure|@noble|@otplib|otplib)/)',
-      ],
-      transform: {
-        '^.+\\.(ts|tsx|js)$': ['ts-jest', {
-          diagnostics: false,
-          tsconfig: {
-            jsx: 'react',
-            types: ['jest', 'node'],
-            esModuleInterop: true,
-            allowJs: true,
-          },
-        }],
-      },
-    },
-    '<rootDir>/backend',
-  ],
+  projects: ['<rootDir>/backend'],
 };
