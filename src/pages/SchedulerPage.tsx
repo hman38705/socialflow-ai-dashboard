@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { OpenAPI } from '../api/core/OpenAPI';
 import { request as apiRequest } from '../api/core/request';
@@ -82,14 +82,12 @@ export default function SchedulerPage() {
       params.set('date', next.toISOString().slice(0, 10));
       setSearchParams(params);
     },
-    [searchParams, setSearchParams]
+    [searchParams, setSearchParams],
   );
 
   const goToday = () => setAnchor(new Date());
-  const goPrev = () =>
-    setAnchor(view === 'week' ? addDays(anchor, -7) : addMonths(anchor, -1));
-  const goNext = () =>
-    setAnchor(view === 'week' ? addDays(anchor, 7) : addMonths(anchor, 1));
+  const goPrev = () => setAnchor(view === 'week' ? addDays(anchor, -7) : addMonths(anchor, -1));
+  const goNext = () => setAnchor(view === 'week' ? addDays(anchor, 7) : addMonths(anchor, 1));
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -100,7 +98,6 @@ export default function SchedulerPage() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [anchor, view]);
 
   useEffect(() => {
@@ -183,7 +180,10 @@ export default function SchedulerPage() {
       </header>
 
       {loading ? (
-        <div className="h-96 animate-pulse rounded-xl bg-dark-surface" data-testid="scheduler-skeleton" />
+        <div
+          className="h-96 animate-pulse rounded-xl bg-dark-surface"
+          data-testid="scheduler-skeleton"
+        />
       ) : view === 'month' ? (
         <CalendarMonth
           anchor={anchor}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useReschedulePost } from './useReschedulePost';
 import type { ScheduledPost } from './schedulerTypes';
 
@@ -46,7 +46,12 @@ function buildMonthGrid(anchor: Date): Date[] {
   return days;
 }
 
-export default function CalendarMonth({ anchor, posts, setPosts, onSlotSelect }: CalendarMonthProps) {
+export default function CalendarMonth({
+  anchor,
+  posts,
+  setPosts,
+  onSlotSelect,
+}: CalendarMonthProps) {
   const grid = useMemo(() => buildMonthGrid(anchor), [anchor]);
   const { reschedulePost, toast, dismissToast } = useReschedulePost(posts, setPosts);
 
@@ -78,9 +83,15 @@ export default function CalendarMonth({ anchor, posts, setPosts, onSlotSelect }:
 
   const handleKeyDown = (e: React.KeyboardEvent, post: ScheduledPost) => {
     const current = new Date(post.scheduledAt);
-    if (e.key === 'ArrowLeft' || e.key === 'ArrowRight' || e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+    if (
+      e.key === 'ArrowLeft' ||
+      e.key === 'ArrowRight' ||
+      e.key === 'ArrowUp' ||
+      e.key === 'ArrowDown'
+    ) {
       e.preventDefault();
-      const delta = e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -7 : 7;
+      const delta =
+        e.key === 'ArrowLeft' ? -1 : e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' ? -7 : 7;
       const proposed = new Date(current);
       proposed.setDate(proposed.getDate() + delta);
       commitReschedule(post.id, proposed);

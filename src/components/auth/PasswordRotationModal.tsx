@@ -1,4 +1,4 @@
-import { FormEvent, useState } from 'react';
+import React, { FormEvent, useState } from 'react';
 import { usePasswordRotation, UsePasswordRotationOptions } from '../../hooks/usePasswordRotation';
 
 export interface PasswordRotationModalProps extends UsePasswordRotationOptions {
@@ -10,10 +10,23 @@ export interface PasswordRotationModalProps extends UsePasswordRotationOptions {
 }
 
 function passwordStrength(password: string) {
-  return [password.length >= 8, /[a-z]/.test(password), /[A-Z]/.test(password), /\d/.test(password), /[^A-Za-z0-9]/.test(password)].filter(Boolean).length;
+  return [
+    password.length >= 8,
+    /[a-z]/.test(password),
+    /[A-Z]/.test(password),
+    /\d/.test(password),
+    /[^A-Za-z0-9]/.test(password),
+  ].filter(Boolean).length;
 }
 
-export function PasswordRotationModal({ isOpen = true, onClose, onSubmit, isLoading: externalLoading, error: externalError, ...options }: PasswordRotationModalProps) {
+export function PasswordRotationModal({
+  isOpen = true,
+  onClose,
+  onSubmit,
+  isLoading: externalLoading,
+  error: externalError,
+  ...options
+}: PasswordRotationModalProps) {
   const rotation = usePasswordRotation({ ...options, onSuccess: onClose });
   const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -31,22 +44,87 @@ export function PasswordRotationModal({ isOpen = true, onClose, onSubmit, isLoad
     try {
       if (onSubmit) await onSubmit(currentPassword, newPassword);
       else await rotation.changePassword(currentPassword, newPassword);
-      setCurrentPassword(''); setNewPassword(''); setConfirmPassword('');
-    } catch (cause) { setLocalError(cause instanceof Error ? cause.message : 'Failed to change password'); }
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+    } catch (cause) {
+      setLocalError(cause instanceof Error ? cause.message : 'Failed to change password');
+    }
   };
-  return <div role="dialog" aria-modal="true" aria-labelledby="password-rotation-title" className="password-rotation-modal">
-    <h2 id="password-rotation-title">{mandatory ? 'Password rotation required' : 'Update your password'}</h2>
-    <p>{mandatory ? 'Your password must be updated before you can continue.' : `${rotation.daysRemaining} days remaining to update your password.`}</p>
-    <form onSubmit={submit}>
-      <label>Current password<input type="password" value={currentPassword} onChange={event => setCurrentPassword(event.target.value)} required disabled={loading} autoComplete="current-password" /></label>
-      <label>New password<input type="password" value={newPassword} onChange={event => setNewPassword(event.target.value)} required disabled={loading} autoComplete="new-password" /></label>
-      <meter min="0" max="5" value={passwordStrength(newPassword)} aria-label="Password strength" />
-      <label>Confirm new password<input type="password" value={confirmPassword} onChange={event => setConfirmPassword(event.target.value)} required disabled={loading} autoComplete="new-password" /></label>
-      {error && <p role="alert">{error}</p>}
-      <button type="submit" disabled={loading}>{loading ? 'Updating...' : 'Update password'}</button>
-      {!mandatory && <button type="button" onClick={() => { rotation.dismiss(); onClose?.(); }} disabled={loading}>Remind me tomorrow</button>}
-    </form>
-  </div>;
+  return (
+    <div
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="password-rotation-title"
+      className="password-rotation-modal"
+    >
+      <h2 id="password-rotation-title">
+        {mandatory ? 'Password rotation required' : 'Update your password'}
+      </h2>
+      <p>
+        {mandatory
+          ? 'Your password must be updated before you can continue.'
+          : `${rotation.daysRemaining} days remaining to update your password.`}
+      </p>
+      <form onSubmit={submit}>
+        <label>
+          Current password
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={(event) => setCurrentPassword(event.target.value)}
+            required
+            disabled={loading}
+            autoComplete="current-password"
+          />
+        </label>
+        <label>
+          New password
+          <input
+            type="password"
+            value={newPassword}
+            onChange={(event) => setNewPassword(event.target.value)}
+            required
+            disabled={loading}
+            autoComplete="new-password"
+          />
+        </label>
+        <meter
+          min="0"
+          max="5"
+          value={passwordStrength(newPassword)}
+          aria-label="Password strength"
+        />
+        <label>
+          Confirm new password
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={(event) => setConfirmPassword(event.target.value)}
+            required
+            disabled={loading}
+            autoComplete="new-password"
+          />
+        </label>
+        {error && <p role="alert">{error}</p>}
+        <button type="submit" disabled={loading}>
+          {loading ? 'Updating...' : 'Update password'}
+        </button>
+        {!mandatory && (
+          <button
+            type="button"
+            onClick={() => {
+              rotation.dismiss();
+              onClose?.();
+            }}
+            disabled={loading}
+          >
+            Remind me tomorrow
+          </button>
+        )}
+      </form>
+    </div>
+  );
 }
 
 export default PasswordRotationModal;

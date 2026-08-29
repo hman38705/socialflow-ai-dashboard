@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { OpenAPI } from '../api/core/OpenAPI';
 import { request as apiRequest } from '../api/core/request';
@@ -160,7 +160,7 @@ export default function PostDetailPage() {
                 <img key={i} src={m.url} alt="" className="rounded-lg object-cover w-full h-32" />
               ) : (
                 <video key={i} src={m.url} controls className="rounded-lg w-full h-32" />
-              )
+              ),
             )}
           </div>
         )}
@@ -188,7 +188,7 @@ export default function PostDetailPage() {
         <h2 className="text-sm font-semibold text-gray-subtext uppercase mb-3">Status timeline</h2>
         <ol className="space-y-2" data-testid="post-timeline">
           {TIMELINE_STAGES.filter((stage) =>
-            post.timeline.some((entry) => entry.stage === stage)
+            post.timeline.some((entry) => entry.stage === stage),
           ).map((stage) => {
             const entry = post.timeline.find((e) => e.stage === stage);
             if (!entry) return null;

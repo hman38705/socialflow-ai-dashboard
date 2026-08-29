@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { AnalyticsService } from '../../api/services/AnalyticsService';
 
 const STORAGE_KEY = 'socialflow.scheduler.best-time-overlay';

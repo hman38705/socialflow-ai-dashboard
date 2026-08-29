@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useReschedulePost } from './useReschedulePost';
 import type { ScheduledPost } from './schedulerTypes';
 
@@ -50,7 +50,7 @@ interface LaidOutPost {
 function layoutDay(dayPosts: ScheduledPost[]): LaidOutPost[] {
   const DURATION_MIN = 30;
   const sorted = [...dayPosts].sort(
-    (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime()
+    (a, b) => new Date(a.scheduledAt).getTime() - new Date(b.scheduledAt).getTime(),
   );
 
   const columns: ScheduledPost[][] = [];
@@ -94,7 +94,10 @@ function layoutDay(dayPosts: ScheduledPost[]): LaidOutPost[] {
 
 export default function CalendarWeek({ anchor, posts, setPosts, onSlotSelect }: CalendarWeekProps) {
   const weekStart = useMemo(() => startOfWeek(anchor), [anchor]);
-  const days = useMemo(() => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)), [weekStart]);
+  const days = useMemo(
+    () => Array.from({ length: 7 }, (_, i) => addDays(weekStart, i)),
+    [weekStart],
+  );
   const { reschedulePost, toast, dismissToast } = useReschedulePost(posts, setPosts);
   const scrollRef = useRef<HTMLDivElement>(null);
   const [now, setNow] = useState(new Date());
@@ -145,7 +148,10 @@ export default function CalendarWeek({ anchor, posts, setPosts, onSlotSelect }: 
         ))}
       </div>
 
-      <div ref={scrollRef} className="relative max-h-[560px] overflow-y-auto rounded-xl border border-dark-border">
+      <div
+        ref={scrollRef}
+        className="relative max-h-[560px] overflow-y-auto rounded-xl border border-dark-border"
+      >
         <div className="grid grid-cols-[48px_repeat(7,1fr)]">
           <div>
             {HOURS.map((h) => (
@@ -183,7 +189,11 @@ export default function CalendarWeek({ anchor, posts, setPosts, onSlotSelect }: 
                 }}
               >
                 {HOURS.map((h) => (
-                  <div key={h} style={{ height: HOUR_HEIGHT_PX }} className="border-t border-dark-border" />
+                  <div
+                    key={h}
+                    style={{ height: HOUR_HEIGHT_PX }}
+                    className="border-t border-dark-border"
+                  />
                 ))}
 
                 {key === nowKey && (
