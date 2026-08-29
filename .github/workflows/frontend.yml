@@ -36,6 +36,9 @@ jobs:
       - name: Run Vitest (includes axe a11y assertions)
         run: npx vitest run
 
+      - name: Docs link-check
+        run: node scripts/check-doc-links.mjs --extra src/README.md
+
   e2e:
     name: E2E smoke suite
     runs-on: ubuntu-latest
