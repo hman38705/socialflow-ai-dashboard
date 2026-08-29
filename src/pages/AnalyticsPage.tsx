@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Area,
   AreaChart,
@@ -97,7 +97,8 @@ export function AnalyticsPage() {
     [],
   );
   const [topPosts, setTopPosts] = useState<Awaited<ReturnType<typeof analytics.getTopPosts>>>([]);
-  const [loading, setLoading] = useState(true);
+  const [hasLoadedOnce, setHasLoadedOnce] = useState(false);
+  const hasLoadedOnceRef = useRef(false);
   const [panelLoading, setPanelLoading] = useState({
     overview: true,
     series: true,
@@ -109,6 +110,7 @@ export function AnalyticsPage() {
 
   useEffect(() => {
     let active = true;
+    const isInitialLoad = !hasLoadedOnceRef.current;
     const query: AnalyticsQuery = {
       range: range as AnalyticsRange,
       ...(platform ? { platform } : {}),
@@ -120,7 +122,6 @@ export function AnalyticsPage() {
       ['hourly', () => analytics.getEngagementByHour(query), setHourly],
       ['topPosts', () => analytics.getTopPosts(query), setTopPosts],
     ] as const;
-    setLoading((current) => current && !overview);
     setPanelLoading({
       overview: true,
       series: true,
@@ -141,7 +142,10 @@ export function AnalyticsPage() {
         }
       }),
     ).finally(() => {
-      if (active) setLoading(false);
+      if (active && isInitialLoad) {
+        hasLoadedOnceRef.current = true;
+        setHasLoadedOnce(true);
+      }
     });
     return () => {
       active = false;
@@ -221,7 +225,7 @@ export function AnalyticsPage() {
           </label>
         </div>
       </header>
-      {loading ? (
+      {!hasLoadedOnce ? (
         <div
           data-testid="page-skeleton"
           style={{ height: 420, background: '#f1f5f9', borderRadius: 8 }}
