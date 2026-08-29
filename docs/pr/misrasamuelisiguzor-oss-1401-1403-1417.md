@@ -1,6 +1,6 @@
 ## Title
 
-FE-022–024: Toast context, Skeleton primitives, Spinner / LoadingScreen
+FE-022–024 / FE-038: Toast context, Skeleton, Spinner/LoadingScreen, RequireAuth guard
 
 ## Body
 
@@ -52,6 +52,23 @@ three.
 Tests (`Spinner.test.tsx`): accessible status name (custom and default), size class per
 size, `LoadingScreen` renders the large spinner over the dark background.
 
+**FE-038 - `RequireAuth` guard (`src/components/auth/RequireAuth.tsx`, new)**
+
+- Wraps route content (or `<Outlet />`). While `useAuth().status` is `idle`/`loading` it
+  renders `<LoadingScreen />` (from FE-024) - never the login page - so a refresh does not
+  flash login for a user who is in fact signed in.
+- An unauthenticated user is redirected to `/login?next=<encoded pathname+search>` with
+  `replace`.
+- Exported `safeNextPath(raw)` is the open-redirect guard for the login page to call on the
+  `next` param after auth: it returns the value only when it is a same-origin relative path,
+  and maps `https://evil.tld`, `//evil.tld`, `/\evil.tld`, and `/javascript:...` to `/`.
+- Optional `roles` prop: a signed-in user lacking every listed role gets a 403 fallback
+  (inline; FE-041's `ForbiddenPage` is on another branch) rather than a redirect. `AuthUser`
+  has no `roles` field yet, so the check reads it defensively.
+- Tests (`RequireAuth.test.tsx`): `safeNextPath` accept/reject cases; LoadingScreen during
+  init with no login flash; redirect carries the encoded `next`; authenticated content
+  renders; missing-role renders 403 not a redirect.
+
 ## Verification
 
 - `npx vitest run src/contexts/ToastContext.test.tsx src/components/ui/Skeleton.test.tsx src/components/ui/Spinner.test.tsx`
@@ -65,3 +82,4 @@ size, `LoadingScreen` renders the large spinner over the dark background.
 Closes #1401
 Closes #1402
 Closes #1403
+Closes #1417
