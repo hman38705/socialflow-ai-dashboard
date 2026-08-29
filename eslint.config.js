@@ -8,7 +8,16 @@ const prettierConfig = require('eslint-config-prettier');
 module.exports = [
   {
     // backend/ has its own eslint.config.js scoped to its own tsconfig.json.
-    ignores: ['backend/**', 'dist/**', 'dist-electron/**', 'node_modules/**', 'coverage/**'],
+    ignores: [
+      'backend/**',
+      'dist/**',
+      'dist-electron/**',
+      'node_modules/**',
+      'coverage/**',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/__tests__/**',
+    ],
   },
   {
     files: ['src/**/*.{ts,tsx}'],
