@@ -7,7 +7,7 @@ interface SectionDef {
   key: string;
   path: string;
   label: string;
-  Component: React.LazyExoticComponent<() => React.JSX.Element>;
+  Component: React.LazyExoticComponent<React.ComponentType>;
   /** Hidden entirely (not just disabled) when this returns false. */
   visibleWhen?: (ctx: { plan?: string }) => boolean;
 }
