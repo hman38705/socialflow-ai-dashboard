@@ -11,7 +11,9 @@ module.exports = [
     ignores: ['backend/**', 'dist/**', 'dist-electron/**', 'node_modules/**', 'coverage/**'],
   },
   {
+    // Non-test source files — use the main tsconfig for full type-aware linting.
     files: ['src/**/*.{ts,tsx}'],
+    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'src/**/*.spec.tsx'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -19,6 +21,33 @@ module.exports = [
         sourceType: 'module',
         project: './tsconfig.json',
         tsconfigRootDir: __dirname,
+      },
+    },
+    plugins: {
+      '@typescript-eslint': tsPlugin,
+      prettier: prettierPlugin,
+    },
+    rules: {
+      ...tsPlugin.configs['recommended'].rules,
+      ...prettierConfig.rules,
+      'prettier/prettier': 'error',
+      '@typescript-eslint/no-unused-vars': [
+        'warn',
+        { argsIgnorePattern: '^_', varsIgnorePattern: '^_', caughtErrorsIgnorePattern: '^_' },
+      ],
+      '@typescript-eslint/explicit-function-return-type': 'off',
+      '@typescript-eslint/no-explicit-any': 'warn',
+    },
+  },
+  {
+    // Test files are excluded from tsconfig.json (they are type-checked by Vitest
+    // via its own config). Lint them without project-aware type information.
+    files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'src/**/*.spec.tsx'],
+    languageOptions: {
+      parser: tsParser,
+      parserOptions: {
+        ecmaVersion: 2020,
+        sourceType: 'module',
       },
     },
     plugins: {
