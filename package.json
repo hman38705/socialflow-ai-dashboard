@@ -22,6 +22,7 @@
     "test:coverage:report": "vitest run --coverage && node scripts/generate-badge.js",
     "test:ci": "vitest run && jest --coverage --ci --maxWorkers=2",
     "check:bundle-budget": "node scripts/check-bundle-budget.mjs",
+    "check:doc-links": "node scripts/check-doc-links.mjs",
     "prepare": "husky install",
     "lint": "eslint .",
     "start:traced": "node -r ./dist/tracing.js dist/index.js",
