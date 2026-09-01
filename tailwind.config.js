@@ -11,21 +11,26 @@ module.exports = {
         mono: ['Fira Code', 'ui-monospace', 'monospace'],
       },
       colors: {
+        // Backed by the CSS custom properties in src/index.css (FE-002) via
+        // Tailwind's `rgb(var(--x) / <alpha-value>)` function syntax — the
+        // literal fraction is each color's previous default opacity, kept
+        // so e.g. `bg-dark-surface` renders identically to before; an
+        // opacity modifier (`bg-dark-surface/50`) still overrides it.
         // Base surfaces — deep cool-black with layered elevation
-        'dark-bg': '#070A14',
-        'dark-elev': '#0C1122',
-        'dark-surface': 'rgba(18, 23, 40, 0.72)',
-        'dark-border': 'rgba(255, 255, 255, 0.08)',
+        'dark-bg': 'rgb(var(--color-dark-bg) / 1)',
+        'dark-elev': 'rgb(var(--color-dark-elev) / 1)',
+        'dark-surface': 'rgb(var(--color-dark-surface) / 0.72)',
+        'dark-border': 'rgb(var(--color-dark-border) / 0.08)',
         // Aurora accent system
-        'primary-blue': '#4f83ff',   // electric engagement blue
-        'primary-teal': '#22d3ee',   // fresh cyan signal (was flat teal)
-        'primary-purple': '#8b5cf6', // violet
-        'primary-rose': '#f43f5e',   // signature reach/AI accent
+        'primary-blue': 'rgb(var(--color-primary-blue) / 1)',   // electric engagement blue
+        'primary-teal': 'rgb(var(--color-primary-teal) / 1)',   // fresh cyan signal (was flat teal)
+        'primary-purple': 'rgb(var(--color-primary-purple) / 1)', // violet
+        'primary-rose': 'rgb(var(--color-primary-rose) / 1)',   // signature reach/AI accent
         // Semantic trend colors
-        'trend-up': '#34d399',
-        'trend-down': '#fb7185',
-        'gray-subtext': '#94a3b8',
-        'glass-white': 'rgba(255, 255, 255, 0.03)',
+        'trend-up': 'rgb(var(--color-trend-up) / 1)',
+        'trend-down': 'rgb(var(--color-trend-down) / 1)',
+        'gray-subtext': 'rgb(var(--color-gray-subtext) / 1)',
+        'glass-white': 'rgb(var(--color-glass-white) / 0.03)',
       },
       backgroundImage: {
         'glass-gradient': 'linear-gradient(135deg, rgba(255, 255, 255, 0.06) 0%, rgba(255, 255, 255, 0) 60%)',

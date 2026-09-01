@@ -2,6 +2,33 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Design tokens as CSS custom properties (FE-002).
+ *
+ * Stored as "R G B" triplets (no rgb()/rgba() wrapper) so Tailwind's
+ * `rgb(var(--x) / <alpha-value>)` color function in tailwind.config.js can
+ * substitute an opacity modifier (e.g. `bg-dark-surface/50`) at build time
+ * while still resolving to a real runtime CSS variable — unlike the
+ * hardcoded hex/rgba literals tailwind.config.js used before, these can be
+ * overridden at runtime (e.g. a future theme toggle) without a rebuild.
+ */
+:root {
+  --color-dark-bg: 7 10 20;
+  --color-dark-elev: 12 17 34;
+  --color-dark-surface: 18 23 40;
+  --color-dark-border: 255 255 255;
+
+  --color-primary-blue: 79 131 255;
+  --color-primary-teal: 34 211 238;
+  --color-primary-purple: 139 92 246;
+  --color-primary-rose: 244 63 94;
+
+  --color-trend-up: 52 211 153;
+  --color-trend-down: 251 113 133;
+  --color-gray-subtext: 148 163 184;
+  --color-glass-white: 255 255 255;
+}
+
 @layer components {
   .btn-primary {
     @apply rounded-xl bg-primary-blue text-white font-bold transition-all hover:bg-primary-blue/80 disabled:opacity-40;

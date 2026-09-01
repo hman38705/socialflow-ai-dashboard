@@ -8,12 +8,21 @@ const prettierConfig = require('eslint-config-prettier');
 module.exports = [
   {
     // backend/ has its own eslint.config.js scoped to its own tsconfig.json.
-    ignores: ['backend/**', 'dist/**', 'dist-electron/**', 'node_modules/**', 'coverage/**'],
+    ignores: [
+      'backend/**',
+      'dist/**',
+      'dist-electron/**',
+      'node_modules/**',
+      'coverage/**',
+      '**/*.test.ts',
+      '**/*.test.tsx',
+      '**/__tests__/**',
+    ],
   },
   {
     // Non-test source files — use the main tsconfig for full type-aware linting.
     files: ['src/**/*.{ts,tsx}'],
-    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'src/**/*.spec.tsx'],
+    ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
@@ -39,10 +48,10 @@ module.exports = [
       '@typescript-eslint/no-explicit-any': 'warn',
     },
   },
+  // Test files are excluded from tsconfig.json, so we lint them without
+  // project-aware type checking to avoid "not included in tsconfig" errors.
   {
-    // Test files are excluded from tsconfig.json (they are type-checked by Vitest
-    // via its own config). Lint them without project-aware type information.
-    files: ['src/**/*.test.ts', 'src/**/*.test.tsx', 'src/**/*.spec.ts', 'src/**/*.spec.tsx'],
+    files: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     languageOptions: {
       parser: tsParser,
       parserOptions: {
