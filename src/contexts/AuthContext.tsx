@@ -12,12 +12,13 @@ import { ApiError } from '../api/core/ApiError';
 import { OpenAPI } from '../api/core/OpenAPI';
 import type { AuthTokens } from '../api/models/AuthTokens';
 import type { Credentials } from '../api/models/Credentials';
+import { useToast } from './ToastContext';
 
 // The refresh token has to survive a page reload for silent-refresh-on-mount to
 // work, but must never land in localStorage — sessionStorage is the compromise.
 // The access token is never persisted at all; it only ever lives in a ref.
-const REFRESH_TOKEN_KEY = 'sf_refresh_token';
-const EMAIL_KEY = 'sf_user_email';
+export const REFRESH_TOKEN_KEY = 'sf_refresh_token';
+export const EMAIL_KEY = 'sf_user_email';
 export const AUTH_LOGOUT_EVENT = 'auth:logout';
 
 export type AuthStatus = 'idle' | 'loading' | 'authenticated' | 'unauthenticated';
@@ -76,6 +77,7 @@ function extractMessage(err: unknown, fallback: string): string {
 }
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { showToast } = useToast();
   const [state, setState] = useState<AuthState>({ user: null, status: 'loading', error: null });
   const accessTokenRef = useRef<string | null>(null);
   const pendingRef = useRef<{ email: string; password: string } | null>(null);
@@ -148,10 +150,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         const message = extractMessage(err, 'Unable to sign in right now.');
         setState({ user: null, status: 'unauthenticated', error: message });
+        showToast(message, 'error');
         throw err;
       }
     },
-    [applySession],
+    [applySession, showToast],
   );
 
   const completeTwoFactor = useCallback(
@@ -168,10 +171,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         const message = extractMessage(err, 'That code was not accepted.');
         setState((s) => ({ ...s, status: 'unauthenticated', error: message }));
+        showToast(message, 'error');
         throw err;
       }
     },
-    [applySession],
+    [applySession, showToast],
   );
 
   const register = useCallback(
@@ -223,10 +227,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } catch (err) {
         const message = extractMessage(err, 'Unable to change your password right now.');
         setState((s) => ({ ...s, error: message }));
+        showToast(message, 'error');
         throw err;
       }
     },
-    [clearSession],
+    [clearSession, showToast],
   );
 
   const value = useMemo<AuthContextValue>(
