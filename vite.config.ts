@@ -52,9 +52,10 @@ export default defineConfig({
       },
     },
   },
-  test: {
-    globals: true,
-    environment: 'jsdom',
-  },
+  // FE-005: no `test` block here — when a sibling vitest.config.ts exists
+  // (it does; see that file), Vitest uses it exclusively and ignores this
+  // file's `test` config entirely rather than merging the two. A `test`
+  // block here was dead, misleading config: it looked authoritative but
+  // silently had no effect, and was missing `setupFiles` besides.
 })
 
