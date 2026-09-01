@@ -79,15 +79,16 @@ function extractMessage(err: unknown, fallback: string): string {
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { showToast } = useToast();
   const [state, setState] = useState<AuthState>({ user: null, status: 'loading', error: null });
-  const accessTokenRef = useRef<string | null>(null);
   const pendingRef = useRef<{ email: string; password: string } | null>(null);
 
   useEffect(() => {
-    OpenAPI.TOKEN = async () => accessTokenRef.current ?? '';
+    // FE-046: wire OpenAPI.TOKEN to the in-memory tokenStore — the token is
+    // never read from localStorage/sessionStorage here.
+    OpenAPI.TOKEN = async () => getToken()?.token ?? '';
   }, []);
 
   const applySession = useCallback((tokens: AuthTokens, email: string) => {
-    accessTokenRef.current = tokens.accessToken;
+    setToken(tokens.accessToken);
     sessionStorage.setItem(REFRESH_TOKEN_KEY, tokens.refreshToken);
     sessionStorage.setItem(EMAIL_KEY, email);
     pendingRef.current = null;
@@ -99,7 +100,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const clearSession = useCallback(() => {
-    accessTokenRef.current = null;
+    clearToken();
     pendingRef.current = null;
     sessionStorage.removeItem(REFRESH_TOKEN_KEY);
     sessionStorage.removeItem(EMAIL_KEY);

@@ -20,6 +20,7 @@ module.exports = [
     ],
   },
   {
+    // Non-test source files — use the main tsconfig for full type-aware linting.
     files: ['src/**/*.{ts,tsx}'],
     ignores: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
     languageOptions: {
