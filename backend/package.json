@@ -61,7 +61,7 @@
     "helmet": "^7.1.0",
     "inversify": "^6.0.2",
     "ioredis": "^5.8.1",
-    "ipaddr.js": "^2.3.0",
+    "ipaddr.js": "^2.5.0",
     "jsonwebtoken": "^9.0.3",
     "meilisearch": "^0.56.0",
     "morgan": "^1.10.0",
