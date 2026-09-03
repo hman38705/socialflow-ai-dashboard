@@ -59,7 +59,7 @@
     "graphql": "^17.0.2",
     "graphql-subscriptions": "^3.0.0",
     "helmet": "^7.1.0",
-    "inversify": "^6.0.2",
+    "inversify": "^8.2.3",
     "ioredis": "^5.8.1",
     "ipaddr.js": "^2.3.0",
     "jsonwebtoken": "^9.0.3",
