@@ -1,8 +1,8 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { WebhooksService } from '../../api/services/WebhooksService';
-import type { WebhookDelivery, WebhookEventType } from '../../api/models';
+import type { WebhookDelivery, WebhookEventType } from '../../api/manual-types';
 
-// The generated `WebhookDelivery` model (src/api/models.ts) only carries the
+// The generated `WebhookDelivery` model (src/api/manual-types.ts) only carries the
 // summary fields the backend currently returns. Request/response detail and
 // duration are optional here so the UI degrades gracefully — rendering "—"
 // or a raw fallback — instead of crashing when a delivery lacks them.

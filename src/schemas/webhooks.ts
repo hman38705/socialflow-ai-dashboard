@@ -7,12 +7,12 @@
  *
  * This repo has no `@socialflow/shared` package to import event constants
  * from, so `WEBHOOK_EVENT_TYPES` is derived once from the generated API
- * model's `WebhookEventType` union (src/api/models.ts, which itself is
+ * model's `WebhookEventType` union (src/api/manual-types.ts, which itself is
  * generated from backend/openapi.yaml). Keeping a single derivation point
  * here — instead of re-declaring the list elsewhere — is what prevents
  * frontend/backend drift in this codebase.
  */
-import type { WebhookEventType } from '../api/models';
+import type { WebhookEventType } from '../api/manual-types';
 
 export const WEBHOOK_EVENT_TYPES: WebhookEventType[] = [
   'post.published',

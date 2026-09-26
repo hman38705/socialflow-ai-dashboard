@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { WebhooksService } from '../../api/services/WebhooksService';
-import type { WebhookSubscription, WebhookEventType } from '../../api/models';
+import type { WebhookSubscription, WebhookEventType } from '../../api/manual-types';
 import {
   WEBHOOK_EVENT_TYPES,
   validateWebhookForm,

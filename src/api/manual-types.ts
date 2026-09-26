@@ -1,5 +1,6 @@
-// Auto-generated from backend/openapi.yaml — do not edit manually.
-// Run `npm run generate-client` to regenerate.
+// Hand-maintained API types. This file is NOT generated. Types that are part of
+// the OpenAPI spec are generated under src/api/models/*.ts; only types that are
+// not (or that narrow the generated ones) live here.
 
 export type WebhookEventType =
   | 'post.published'
@@ -8,20 +9,6 @@ export type WebhookEventType =
   | 'blockchain.transaction_completed'
   | 'blockchain.transaction_failed'
   | 'system.health_check';
-
-export type Credentials = {
-  email: string;
-  password: string;
-};
-
-export type RefreshTokenRequest = {
-  refreshToken: string;
-};
-
-export type AuthTokens = {
-  accessToken?: string;
-  refreshToken?: string;
-};
 
 export type WebhookSubscription = {
   id?: string;
@@ -54,16 +41,6 @@ export type WebhookDelivery = {
   errorMessage?: string | null;
   createdAt?: string;
   nextRetryAt?: string | null;
-};
-
-export type VideoJob = {
-  jobId?: string;
-  status?: 'pending' | 'processing' | 'completed' | 'failed' | 'cancelled';
-  progress?: number;
-  inputPath?: string;
-  outputPath?: string | null;
-  error?: string | null;
-  createdAt?: string;
 };
 
 export type TranslationRequest = {
