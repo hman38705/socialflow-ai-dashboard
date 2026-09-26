@@ -46,8 +46,6 @@ model RoleAssignment {
   role      String
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-
-  @@index([userId])
 }
 
 model Organization {
@@ -280,25 +278,6 @@ model Subscription {
   creditsRemaining       Int
   creditsMonthly         Int
   currentPeriodEnd       DateTime?
-  createdAt              DateTime    @default(now())
-  updatedAt              DateTime    @updatedAt
-  creditLogs             CreditLog[]
+  createdAt    
 
-  @@index([userId])
-  @@index([stripeCustomerId])
-  @@index([stripeSubscriptionId])
-}
-
-model CreditLog {
-  id             String       @id @default(uuid())
-  userId         String
-  action         String
-  delta          Int
-  balanceAfter   Int
-  metadata       Json?
-  createdAt      DateTime     @default(now())
-  subscription   Subscription @relation(fields: [userId], references: [userId], onDelete: Cascade)
-
-  @@index([userId])
-  @@index([createdAt])
-}
+/* … truncated 584 chars — edit only what you need near the top … */
