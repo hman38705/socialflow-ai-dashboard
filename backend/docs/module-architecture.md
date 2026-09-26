@@ -34,7 +34,7 @@ src/shared/
               prismaSoftDelete.ts, requestId.ts, requireCredits.ts, tracingMiddleware.ts, validate.ts
   schemas/    auth.ts, tts.ts, webhooks.ts
   types/      circuitBreaker.ts, predictive.ts, translation.ts, tts.ts, video.ts
-  utils/      BaseRepository.ts, initDirectories.ts, Transactional.ts, UnitOfWork.ts
+  utils/      BaseRepository.ts, initDirectories.ts, UnitOfWork.ts
 ```
 
 ---
