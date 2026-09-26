@@ -1,11 +1,12 @@
 import { Router, Request, Response } from 'express';
 import { z } from 'zod';
-import { authMiddleware, AuthRequest } from '../middleware/authMiddleware';
-import { validate } from '../middleware/validate';
+import { authMiddleware, AuthRequest } from '../../middleware/authMiddleware';
+import { validate } from '../../middleware/validate';
 import { billingService } from '../services/BillingService';
-import { SubscriptionStore, CreditLogStore } from '../models/Subscription';
-import { UserStore } from '../models/User';
-import { createLogger } from '../lib/logger';
+import { SubscriptionStore, CreditLogStore } from '../../models/Subscription';
+import { UserStore } from '../../models/User';
+import { createLogger } from '../../lib/logger';
+import { rejectDisallowedUrls } from '../../routes/billing';
 
 const router = Router();
 const logger = createLogger('billing-routes');
@@ -67,6 +68,7 @@ router.post(
   validate(checkoutSchema),
   async (req: AuthRequest, res: Response) => {
     const { priceId, successUrl, cancelUrl } = req.body;
+    if (rejectDisallowedUrls({ successUrl, cancelUrl }, res)) return;
     try {
       const url = await billingService.createCheckoutSession(
         req.user!.id,
@@ -92,6 +94,7 @@ router.post(
   validate(portalSchema),
   async (req: AuthRequest, res: Response) => {
     const { returnUrl } = req.body;
+    if (rejectDisallowedUrls({ returnUrl }, res)) return;
     try {
       const url = await billingService.createPortalSession(req.user!.id, returnUrl);
       return res.json({ url });

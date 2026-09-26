@@ -34,7 +34,7 @@ function isAllowedRedirectUrl(url: string): boolean {
   }
 }
 
-function rejectDisallowedUrls(
+export function rejectDisallowedUrls(
   urls: Record<string, string>,
   res: Response,
 ): boolean {
