@@ -1,54 +1,118 @@
-variable "env"              { type = string }
-variable "vpc_id"           { type = string }
-variable "public_subnet_ids"  { type = list(string) }
-variable "private_subnet_ids" { type = list(string) }
-variable "image_uri"        { type = string }
-
-# Security group attached to the ECS service's ENIs, created outside this
-# module (see the app_sg_id note in outputs.tf) so it can be shared with the
-# rds/elasticache modules without creating a circular module dependency.
-variable "app_sg_id"        { type = string }
-
-# CPU/memory right-sizing
-# Values are set based on observed p95 usage plus 20% headroom from Container Insights metrics.
-# Fargate valid CPU/memory combinations: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task-cpu-memory-error.html
-# Default (dev/staging): 256 CPU units (0.25 vCPU) / 512 MB — sufficient for low-traffic environments.
-# Production overrides are set in terraform/environments/prod/main.tf.
-variable "cpu"              {
-  type        = number
-  default     = 256
-  description = "Fargate task CPU units (256, 512, 1024, 2048, 4096). Set based on p95 usage + 20% headroom."
-}
-variable "memory"           {
-  type        = number
-  default     = 512
-  description = "Fargate task memory in MiB. Must be compatible with the chosen cpu value."
-}
-
-variable "desired_count"    { type = number; default = 1 }
-variable "container_port"   { type = number; default = 3001 }
-
-# Split DB connection fields (replaces a single pre-assembled database_url)
-# so the password is never stored as part of one combined Terraform-tracked
-# SSM parameter value. See modules/ecs/main.tf for the SSM parameters and
-# backend/src/config/config.ts for runtime reassembly.
-variable "db_host"          { type = string }
-variable "db_port"          { type = number; default = 5432 }
-variable "db_name"          { type = string }
-variable "db_username"      { type = string }
-variable "db_password"      { type = string; sensitive = true }
-
-variable "redis_url"        { type = string; sensitive = true }
-variable "jwt_secret"       { type = string; sensitive = true }
-variable "s3_bucket"        { type = string }
-variable "aws_region"       { type = string }
-
-variable "service_domain" {
+variable "env" {
+  description = "Environment name (dev or prod)"
   type        = string
-  description = "Domain name for the service, used for the ACM certificate and HTTPS listener"
+  validation {
+    condition     = contains(["dev", "prod"], var.env)
+    error_message = "Environment must be either 'dev' or 'prod'."
+  }
 }
 
-variable "hosted_zone_id" {
+variable "aws_region" {
+  description = "AWS region"
   type        = string
-  description = "Route53 hosted zone ID for DNS validation of the ACM certificate"
+}
+
+variable "project_name" {
+  description = "Project name used as a prefix for ECS resource names"
+  type        = string
+}
+
+variable "vpc_id" {
+  description = "ID of the VPC where the ECS cluster and services are deployed"
+  type        = string
+}
+
+variable "private_subnet_ids" {
+  description = "List of private subnet IDs used by the ECS services"
+  type        = list(string)
+}
+
+variable "public_subnet_ids" {
+  description = "List of public subnet IDs used by internet-facing load balancers"
+  type        = list(string)
+}
+
+variable "cluster_name" {
+  description = "Name of the ECS cluster"
+  type        = string
+}
+
+variable "service_name" {
+  description = "Name of the ECS service"
+  type        = string
+}
+
+variable "task_family" {
+  description = "Family name for the ECS task definition"
+  type        = string
+}
+
+variable "container_name" {
+  description = "Name of the container within the ECS task definition"
+  type        = string
+}
+
+variable "container_image" {
+  description = "Docker image (including tag) used for the container"
+  type        = string
+}
+
+variable "container_port" {
+  description = "Port the container listens on"
+  type        = number
+}
+
+variable "cpu" {
+  description = "CPU units reserved for the task (e.g. 256, 512, 1024)"
+  type        = number
+}
+
+variable "memory" {
+  description = "Memory in MiB reserved for the task (e.g. 512, 1024, 2048)"
+  type        = number
+}
+
+variable "desired_count" {
+  description = "Number of task instances to run for the ECS service"
+  type        = number
+}
+
+variable "launch_type" {
+  description = "ECS launch type for the service (FARGATE or EC2)"
+  type        = string
+}
+
+variable "assign_public_ip" {
+  description = "Whether to assign a public IP to tasks (required for Fargate in public subnets)"
+  type        = bool
+}
+
+variable "execution_role_arn" {
+  description = "ARN of the IAM role used by the ECS agent to pull images and write logs"
+  type        = string
+}
+
+variable "task_role_arn" {
+  description = "ARN of the IAM role assumed by the application running in the container"
+  type        = string
+}
+
+variable "log_retention_days" {
+  description = "Number of days to retain CloudWatch logs for the service"
+  type        = number
+}
+
+variable "health_check_path" {
+  description = "HTTP path used by the load balancer target group health check"
+  type        = string
+}
+
+variable "environment_variables" {
+  description = "Map of environment variables passed to the container"
+  type        = map(string)
+}
+
+variable "tags" {
+  description = "Map of tags applied to all ECS resources"
+  type        = map(string)
 }
