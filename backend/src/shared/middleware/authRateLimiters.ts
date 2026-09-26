@@ -56,3 +56,12 @@ export const loginRegisterLimiter: RequestHandler = rateLimit({
   legacyHeaders: false,
   handler: tooManyRequests,
 });
+
+/** POST /api/auth/refresh — more permissive than login, keyed per IP. */
+export const refreshLimiter: RequestHandler = rateLimit({
+  windowMs: envInt('AUTH_REFRESH_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
+  max: envInt('AUTH_REFRESH_RATE_LIMIT_MAX', 30),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooManyRequests,
+});
