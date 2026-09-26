@@ -1,7 +1,11 @@
 import { Router, Request, Response } from 'express';
 import { translationService } from '../services/TranslationService';
+import { authMiddleware } from '../../middleware/authMiddleware';
+import { translationLimiter, TRANSLATION_BATCH_MAX_TEXTS } from '../../shared/middleware/authRateLimiters';
 
 const router = Router();
+
+router.use(authMiddleware, translationLimiter);
 
 /**
  * POST /api/translation/translate
@@ -104,6 +108,12 @@ router.post('/batch', async (req: Request, res: Response) => {
 
     if (!Array.isArray(texts) || texts.length === 0) {
       return res.status(400).json({ error: 'Texts array is required' });
+    }
+
+    if (texts.length > TRANSLATION_BATCH_MAX_TEXTS) {
+      return res
+        .status(400)
+        .json({ error: `texts may contain at most ${TRANSLATION_BATCH_MAX_TEXTS} items` });
     }
 
     if (!Array.isArray(targetLanguages) || targetLanguages.length === 0) {
