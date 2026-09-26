@@ -1,6 +1,9 @@
 /**
  * Global Semantic Error Codes
- * These codes are used by the frontend and backend for precise error handling.
+ * Frontend-only, client-side error classification. The backend does NOT emit
+ * these codes: its error body is `{ error?: string; message?: string }` (see
+ * src/api/models/Error.ts). Use `errorCodeFromResponse` (src/utils/errorCodeFromResponse.ts)
+ * to derive an ErrorCode from a real API response's HTTP status.
  */
 export enum ErrorCode {
   // Authentication Errors (401)

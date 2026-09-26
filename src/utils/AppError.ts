@@ -22,7 +22,8 @@ export class AppError extends Error {
   }
 
   /**
-   * Helper to serialize error for JSON responses
+   * Serializes this client-side error for local use (logging, UI state).
+   * This is NOT the backend's wire format, which has no `code` field.
    */
   public toResponse() {
     return {
