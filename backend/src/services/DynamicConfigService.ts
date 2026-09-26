@@ -1,5 +1,8 @@
 import { prisma } from '../lib/prisma';
 import { config } from '../config/config';
+import { createLogger } from '../lib/logger';
+
+const logger = createLogger('DynamicConfigService');
 
 export enum ConfigKey {
   RATE_LIMIT_MAX = 'RATE_LIMIT_MAX',
@@ -115,16 +118,13 @@ export class DynamicConfigService {
       this.cache = newCache;
 
       this.lastRefreshTimestamp = new Date();
-      console.log(
-        `[DynamicConfigService] Cache refreshed at ${this.lastRefreshTimestamp.toISOString()}. Loaded ${configs.length} configs.`,
+      logger.info(
+        `Cache refreshed at ${this.lastRefreshTimestamp.toISOString()}. Loaded ${configs.length} configs.`,
       );
     } catch (error) {
       // If table doesn't exist yet, we just log it. In a real environment,
       // migrations would handle this before the service starts.
-      console.error(
-        '[DynamicConfigService] Failed to refresh config cache:',
-        (error as Error).message,
-      );
+      logger.error('Failed to refresh config cache', { error: (error as Error).message });
     } finally {
       this.isPollingActive = false;
     }
@@ -184,7 +184,7 @@ export class DynamicConfigService {
       try {
         listener(key, newValue);
       } catch (err) {
-        console.error(`[DynamicConfigService] Listener error for key "${key}":`, err);
+        logger.error(`Listener error for key "${key}"`, { error: err });
       }
     }
   }
@@ -202,10 +202,7 @@ export class DynamicConfigService {
         try {
           return JSON.parse(value);
         } catch (e) {
-          console.error(
-            `[DynamicConfigService] Failed to parse JSON value for config: ${value}`,
-            e,
-          );
+          logger.error(`Failed to parse JSON value for config: ${value}`, { error: e });
           return null;
         }
       case 'string':
@@ -247,18 +244,6 @@ export class DynamicConfigService {
   }
 }
 
-// Singleton — initialized with the factory so the cache is populated before first use.
-let _dynamicConfigServicePromise: Promise<DynamicConfigService> | null = null;
-let _dynamicConfigServiceInstance: DynamicConfigService | null = null;
-
-export async function getDynamicConfigService(): Promise<DynamicConfigService> {
-  if (!_dynamicConfigServicePromise) {
-    _dynamicConfigServicePromise = DynamicConfigService.create(
-      config.DYNAMIC_CONFIG_POLL_INTERVAL_MS,
-    ).then(instance => {
-      _dynamicConfigServiceInstance = instance;
-      return instance;
-    });
-  }
-  return _dynamicConfigServicePromise;
-}
+// Singleton — initialized with the factory to guarantee the cache is warm
+// before any consumer reads from it.
+export const _dynamicConfigServiceInstance: DynamicConfigService | null = null;

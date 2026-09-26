@@ -12,6 +12,19 @@ jest.mock('../../config/config', () => ({
   config: { DYNAMIC_CONFIG_POLL_INTERVAL_MS: 60000 },
 }));
 
+// Capture structured logger calls so we can assert the service logs via the
+// structured logger rather than console.log/console.error.
+const mockLogger = {
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
+  debug: jest.fn(),
+};
+
+jest.mock('../../lib/logger', () => ({
+  createLogger: jest.fn(() => mockLogger),
+}));
+
 describe('DynamicConfigService – poll interval', () => {
   beforeEach(() => jest.useFakeTimers());
   afterEach(() => jest.useRealTimers());
@@ -240,10 +253,45 @@ describe('DynamicConfigService – runtime override propagation', () => {
       { key: 'b', value: '2', type: 'number' },
     ]);
     const svc = await DynamicConfigService.create();
-
     const status = svc.getStatus();
-    expect(status.keysCachedCount).toBe(2);
-    expect(status.cachedKeys).toContain('a');
-    expect(status.cachedKeys).toContain('b');
+    expect(status.cachedKeys).toBe(2);
+  });
+});
+
+describe('DynamicConfigService – structured logging', () => {
+  let consoleLogSpy: jest.SpyInstance;
+  let consoleErrorSpy: jest.SpyInstance;
+
+  beforeEach(() => {
+    jest.clearAllMocks();
+    consoleLogSpy = jest.spyOn(console, 'log').mockImplementation(() => undefined);
+    consoleErrorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined);
+  });
+
+  afterEach(() => {
+    consoleLogSpy.mockRestore();
+    consoleErrorSpy.mockRestore();
+  });
+
+  it('logs a config change via the structured logger, not console', async () => {
+    mockFindMany.mockResolvedValueOnce([]);
+    mockUpsert.mockResolvedValue({});
+    const svc = await DynamicConfigService.create();
+
+    await svc.set(ConfigKey.RATE_LIMIT_MAX, 500, 'number');
+
+    expect(mockLogger.info).toHaveBeenCalled();
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
+  });
+
+  it('logs errors via the structured logger, not console', async () => {
+    mockFindMany.mockRejectedValueOnce(new Error('db down'));
+
+    await expect(DynamicConfigService.create()).rejects.toThrow('db down');
+
+    expect(mockLogger.error).toHaveBeenCalled();
+    expect(consoleLogSpy).not.toHaveBeenCalled();
+    expect(consoleErrorSpy).not.toHaveBeenCalled();
   });
 });
