@@ -1,11 +1,36 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { videoService } from '../services/VideoService';
-import { videoQueue } from '../queues/VideoQueue';
-import { videoHealthService } from '../services/VideoHealthService';
+import { videoService } from '../../services/VideoService';
+import { videoQueue } from '../../queues/VideoQueue';
+import { videoHealthService } from '../../services/VideoHealthService';
+import { authMiddleware, AuthRequest } from '../../middleware/authMiddleware';
 
 const router = Router();
+
+// jobId -> owning userId; jobs are only visible to the user who created them
+const jobOwners = new Map<string, string>();
+const ownsJob = (jobId: string, userId: string | undefined) =>
+  !!userId && jobOwners.get(jobId) === userId;
+
+/**
+ * GET /api/video/health
+ * Check video service health (FFmpeg availability) — intentionally unauthenticated
+ */
+router.get('/health', async (req: Request, res: Response) => {
+  try {
+    const health = await videoHealthService.getHealthStatus();
+    const statusCode = health.status === 'healthy' ? 200 : 503;
+    res.status(statusCode).json(health);
+  } catch (_error) {
+    res.status(500).json({
+      status: 'unhealthy',
+      error: 'Failed to check health status',
+    });
+  }
+});
+
+router.use(authMiddleware);
 
 // Configure multer for video uploads
 const storage = multer.diskStorage({
@@ -44,7 +69,7 @@ const upload = multer({
  * POST /api/video/upload
  * Upload a video and start transcoding
  */
-router.post('/upload', upload.single('video'), async (req: Request, res: Response) => {
+router.post('/upload', upload.single('video'), async (req: AuthRequest, res: Response) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No video file provided' });
@@ -54,7 +79,8 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
     const options = req.body.options ? JSON.parse(req.body.options) : {};
 
     // Create transcoding job
-    const jobId = await videoService.createTranscodingJob(inputPath, options);
+    const jobId = await videoService.createTranscodingJob(inputPath, options, req.user!.id);
+    jobOwners.set(jobId, req.user!.id);
 
     res.status(202).json({
       message: 'Video uploaded successfully. Transcoding started.',
@@ -71,9 +97,9 @@ router.post('/upload', upload.single('video'), async (req: Request, res: Respons
  * GET /api/video/job/:jobId
  * Get transcoding job status
  */
-router.get('/job/:jobId', (req: Request, res: Response) => {
+router.get('/job/:jobId', async (req: AuthRequest, res: Response) => {
   const { jobId } = req.params;
-  const job = videoService.getJob(jobId);
+  const job = ownsJob(jobId, req.user?.id) ? await videoService.getJob(jobId) : undefined;
 
   if (!job) {
     return res.status(404).json({ error: 'Job not found' });
@@ -86,8 +112,8 @@ router.get('/job/:jobId', (req: Request, res: Response) => {
  * GET /api/video/jobs
  * Get all transcoding jobs
  */
-router.get('/jobs', (req: Request, res: Response) => {
-  const jobs = videoService.getAllJobs();
+router.get('/jobs', async (req: AuthRequest, res: Response) => {
+  const jobs = (await videoService.getAllJobs()).filter((j) => ownsJob(j.id, req.user?.id));
   res.json({ jobs });
 });
 
@@ -95,9 +121,9 @@ router.get('/jobs', (req: Request, res: Response) => {
  * DELETE /api/video/job/:jobId
  * Cancel a transcoding job
  */
-router.delete('/job/:jobId', async (req: Request, res: Response) => {
+router.delete('/job/:jobId', async (req: AuthRequest, res: Response) => {
   const { jobId } = req.params;
-  const cancelled = await videoService.cancelJob(jobId);
+  const cancelled = ownsJob(jobId, req.user?.id) && (await videoService.cancelJob(jobId));
 
   if (!cancelled) {
     return res.status(404).json({ error: 'Job not found' });
@@ -113,23 +139,6 @@ router.delete('/job/:jobId', async (req: Request, res: Response) => {
 router.get('/queue/status', (req: Request, res: Response) => {
   const status = videoQueue.getStatus();
   res.json(status);
-});
-
-/**
- * GET /api/video/health
- * Check video service health (FFmpeg availability)
- */
-router.get('/health', async (req: Request, res: Response) => {
-  try {
-    const health = await videoHealthService.getHealthStatus();
-    const statusCode = health.status === 'healthy' ? 200 : 503;
-    res.status(statusCode).json(health);
-  } catch (_error) {
-    res.status(500).json({
-      status: 'unhealthy',
-      error: 'Failed to check health status',
-    });
-  }
 });
 
 export default router;
