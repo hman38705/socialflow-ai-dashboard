@@ -35,3 +35,46 @@ spec:
         target:
           type: AverageValue
           averageValue: "50"
+---
+# Worker HPA: queue depth reflects load on the consumer of the BullMQ
+# queues, so the worker deployment (not the API) is the component that
+# must scale out when a queue backs up. Uses the same external
+# bullmq_queue_waiting gauge exposed via the Prometheus Adapter.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: socialflow-worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: socialflow-worker
+  minReplicas: 2
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+    - type: Resource
+      resource:
+        name: memory
+        target:
+          type: Utilization
+          averageUtilization: 80
+    # Primary queue-depth signal: scale out when any BullMQ queue has
+    # more than 50 waiting jobs. Requires the Prometheus Adapter with a
+    # custom metric rule mapping the bullmq_queue_waiting gauge to this
+    # external metric name.
+    - type: External
+      external:
+        metric:
+          name: bullmq_queue_waiting
+          selector:
+            matchLabels:
+              app: socialflow-worker
+        target:
+          type: AverageValue
+          averageValue: "50"
