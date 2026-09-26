@@ -1,5 +1,28 @@
-variable "env"        { type = string }
-variable "vpc_id"     { type = string }
-variable "subnet_ids" { type = list(string) }
-variable "node_type"  { type = string; default = "cache.t3.micro" }
-variable "app_sg_id"  { type = string }
+variable "env" {
+  description = "Environment name (dev or prod)"
+  type        = string
+  validation {
+    condition     = contains(["dev", "prod"], var.env)
+    error_message = "Environment must be either 'dev' or 'prod'."
+  }
+}
+
+variable "aws_region" {
+  description = "AWS region"
+  type        = string
+}
+
+variable "cluster_id" {
+  description = "Identifier for the ElastiCache cluster"
+  type        = string
+}
+
+variable "node_type" {
+  description = "ElastiCache node instance type"
+  type        = string
+}
+
+variable "num_cache_nodes" {
+  description = "Number of cache nodes in the ElastiCache cluster"
+  type        = number
+}
