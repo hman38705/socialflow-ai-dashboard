@@ -14,7 +14,7 @@ jest.mock('../../../services/AuthBlacklistService', () => ({
 }));
 
 const mockTranslate = jest.fn();
-jest.mock('../services/TranslationService', () => ({
+jest.mock('../../../services/TranslationService', () => ({
   translationService: {
     translate: (...args: any[]) => mockTranslate(...args),
     getSupportedLanguages: () => [],

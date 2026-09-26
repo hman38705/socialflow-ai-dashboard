@@ -36,3 +36,14 @@ export const translationLimiter: RequestHandler = (
   res: Response,
   next: NextFunction,
 ) => (aiLimiter ? aiLimiter(req, res, next) : next());
+
+/** POST /api/facebook/post — write-heavy, per authenticated user (falls back to IP). */
+export const facebookPostLimiter: RequestHandler = rateLimit({
+  windowMs: envInt('FACEBOOK_POST_RATE_LIMIT_WINDOW_MS', 60 * 1000),
+  max: envInt('FACEBOOK_POST_RATE_LIMIT_MAX', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: (req: Request) =>
+    (req as Request & { user?: { id?: string } }).user?.id ?? req.ip ?? 'unknown',
+  handler: tooManyRequests,
+});

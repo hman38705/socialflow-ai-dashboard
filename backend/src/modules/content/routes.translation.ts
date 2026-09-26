@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import { translationService } from '../services/TranslationService';
+import { translationService } from '../../services/TranslationService';
 import { authMiddleware } from '../../middleware/authMiddleware';
 import { translationLimiter, TRANSLATION_BATCH_MAX_TEXTS } from '../../shared/middleware/authRateLimiters';
 

@@ -1,6 +1,8 @@
 import { Router, Request, Response } from 'express';
-import { facebookService, FacebookPostRequest } from '../services/FacebookService';
-import { createLogger } from '../lib/logger';
+import { facebookService, FacebookPostRequest } from '../../services/FacebookService';
+import { createLogger } from '../../lib/logger';
+import { authMiddleware } from '../../middleware/authMiddleware';
+import { facebookPostLimiter } from '../../shared/middleware/authRateLimiters';
 
 const router = Router();
 const logger = createLogger('facebook-routes');
@@ -64,7 +66,7 @@ router.get('/callback', async (req: Request, res: Response) => {
  * Returns the list of pages the user manages.
  * Expects ?access_token=<token>
  */
-router.get('/pages', async (req: Request, res: Response) => {
+router.get('/pages', authMiddleware, async (req: Request, res: Response) => {
   const accessToken = req.query.access_token as string;
   if (!accessToken) {
     return res.status(400).json({ error: 'access_token query param required.' });
@@ -92,7 +94,7 @@ router.get('/pages', async (req: Request, res: Response) => {
  * Body: { pageId, message, imageUrl?, scheduledTime? }
  * Header: x-facebook-token (user access token)
  */
-router.post('/post', async (req: Request, res: Response) => {
+router.post('/post', authMiddleware, facebookPostLimiter, async (req: Request, res: Response) => {
   const accessToken = req.headers['x-facebook-token'] as string;
   const { pageId, message, imageUrl, scheduledTime } = req.body;
 
