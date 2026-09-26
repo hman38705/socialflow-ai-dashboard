@@ -112,6 +112,18 @@ export const dataPruningErrorsTotal = new Counter({
   registers: [register],
 });
 
+/**
+ * Total webhook dispatch attempts (success or failure).
+ * Serves as the denominator for the webhook delivery failure-rate SLI:
+ * `webhookDispatchFailed / webhookDispatchTotal`.
+ */
+export const webhookDispatchTotal = new Counter({
+  name: 'webhook_dispatch_total',
+  help: 'Total number of webhook delivery attempts (success or failure)',
+  labelNames: ['subscription_id'] as const,
+  registers: [register],
+});
+
 export const webhookDispatchFailed = new Counter({
   name: 'webhook_dispatch_failed_total',
   help: 'Total number of webhook delivery attempts that failed with an unexpected dispatcher error',
