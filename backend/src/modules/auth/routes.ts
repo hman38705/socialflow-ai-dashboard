@@ -4,11 +4,12 @@ import { validate } from '../../middleware/validate';
 import { credentialsSchema, refreshTokenSchema, changePasswordSchema } from '../../schemas/auth';
 import { authenticate, AuthRequest } from '../../middleware/authenticate';
 import { sseTicketService } from '../../services/SSETicketService';
+import { loginRegisterLimiter } from '../../shared/middleware/authRateLimiters';
 
 const router = Router();
 
-router.post('/register', validate(credentialsSchema), register);
-router.post('/login', validate(credentialsSchema), login);
+router.post('/register', loginRegisterLimiter, validate(credentialsSchema), register);
+router.post('/login', loginRegisterLimiter, validate(credentialsSchema), login);
 router.post('/refresh', validate(refreshTokenSchema), refresh);
 router.post('/logout', validate(refreshTokenSchema), logout);
 router.post('/change-password', authenticate, validate(changePasswordSchema), changePassword);

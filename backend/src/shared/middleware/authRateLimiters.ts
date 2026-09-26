@@ -47,3 +47,12 @@ export const facebookPostLimiter: RequestHandler = rateLimit({
     (req as Request & { user?: { id?: string } }).user?.id ?? req.ip ?? 'unknown',
   handler: tooManyRequests,
 });
+
+/** POST /api/auth/login and /register — strict, per IP. */
+export const loginRegisterLimiter: RequestHandler = rateLimit({
+  windowMs: envInt('AUTH_LOGIN_RATE_LIMIT_WINDOW_MS', 15 * 60 * 1000),
+  max: envInt('AUTH_LOGIN_RATE_LIMIT_MAX', 10),
+  standardHeaders: true,
+  legacyHeaders: false,
+  handler: tooManyRequests,
+});
