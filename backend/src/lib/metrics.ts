@@ -131,6 +131,36 @@ export const webhookDispatchFailed = new Counter({
   registers: [register],
 });
 
+/**
+ * TTS job counters — incremented by the TTS job processor on each outcome.
+ * `ttsJobTotal` is the denominator for the TTS failure-rate SLI:
+ * `ttsJobFailedTotal / ttsJobTotal`.
+ */
+export const ttsJobTotal = new Counter({
+  name: 'tts_job_total',
+  help: 'Total number of TTS job processing attempts (success or failure)',
+  labelNames: ['status'] as const,
+  registers: [register],
+});
+
+export const ttsJobFailedTotal = new Counter({
+  name: 'tts_job_failed_total',
+  help: 'Total number of TTS job processing attempts that failed with an error',
+  registers: [register],
+});
+
+/**
+ * TTS job processing duration histogram (ms).
+ * Observed once per TTS job run, labelled by outcome status.
+ */
+export const ttsJobDuration = new Histogram({
+  name: 'tts_job_duration_ms',
+  help: 'TTS job processing duration in milliseconds',
+  labelNames: ['status'] as const,
+  buckets,
+  registers: [register],
+});
+
 /** Map a request path to an SLI category. */
 export function resolveCategory(path: string): string {
   if (/^\/(health|status)/.test(path) || /\/health/.test(path)) return 'health';
