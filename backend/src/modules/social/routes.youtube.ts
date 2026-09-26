@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { youTubeService } from '../services/YouTubeService';
 import { enqueueYouTubeSync } from '../jobs/youtubeSyncJob';
 import { createLogger } from '../lib/logger';
+import { authMiddleware } from '../middleware/auth';
 
 const router = Router();
 const logger = createLogger('youtube-routes');
@@ -48,14 +49,20 @@ router.get('/callback', async (req: Request, res: Response) => {
   }
 });
 
+// All data-returning routes below require a valid SocialFlow session.
+router.use(authMiddleware);
+
 /**
  * GET /api/youtube/channel
  * Returns channel metadata for the authenticated user.
- * Expects ?access_token=<token> (in production, read from session/DB).
+ * The YouTube access token is read server-side from the authenticated
+ * user's stored credentials, never from a caller-supplied query param.
  */
 router.get('/channel', async (req: Request, res: Response) => {
-  const accessToken = req.query.access_token as string;
-  if (!accessToken) return res.status(400).json({ error: 'access_token query param required.' });
+  const accessToken = (req as any).user?.youTubeAccessToken as string | undefined;
+  if (!accessToken) {
+    return res.status(400).json({ error: 'YouTube account not connected.' });
+  }
 
   try {
     const channel = await youTubeService.getChannel(accessToken);
@@ -69,12 +76,15 @@ router.get('/channel', async (req: Request, res: Response) => {
 /**
  * GET /api/youtube/videos/stats
  * Returns statistics for given video IDs.
- * Query: access_token, ids (comma-separated)
+ * Query: ids (comma-separated)
+ * The YouTube access token is read server-side from the authenticated
+ * user's stored credentials, never from a caller-supplied query param.
  */
 router.get('/videos/stats', async (req: Request, res: Response) => {
-  const { access_token, ids } = req.query;
-  if (!access_token || !ids) {
-    return res.status(400).json({ error: 'access_token and ids query params required.' });
+  const { ids } = req.query;
+  const accessToken = (req as any).user?.youTubeAccessToken as string | undefined;
+  if (!accessToken || !ids) {
+    return res.status(400).json({ error: 'ids query param required and YouTube account must be connected.' });
   }
 
   const videoIds = (ids as string)
@@ -82,7 +92,7 @@ router.get('/videos/stats', async (req: Request, res: Response) => {
     .map((id) => id.trim())
     .filter(Boolean);
   try {
-    const stats = await youTubeService.getVideoStats(access_token as string, videoIds);
+    const stats = await youTubeService.getVideoStats(accessToken, videoIds);
     return res.json(stats);
   } catch (err) {
     logger.error('Failed to fetch video stats', { error: (err as Error).message });
