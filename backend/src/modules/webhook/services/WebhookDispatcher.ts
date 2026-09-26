@@ -1,7 +1,8 @@
 import crypto from 'crypto';
-import { prisma } from '../lib/prisma';
-import { createLogger } from '../lib/logger';
-import { WebhookEventType } from '../schemas/webhooks';
+import { prisma } from '../../../lib/prisma';
+import { createLogger } from '../../../lib/logger';
+import { WebhookEventType } from '../../../schemas/webhooks';
+import { assertSafeUrl } from '../../../services/WebhookDispatcher';
 
 const logger = createLogger('WebhookDispatcher');
 
@@ -81,6 +82,18 @@ export async function attemptDelivery(
   payload: string,
   attempt: number,
 ): Promise<void> {
+  try {
+    await assertSafeUrl(url);
+  } catch (err) {
+    const errorMessage = err instanceof Error ? err.message : String(err);
+    logger.error(`Delivery ${deliveryId} blocked — unsafe URL`, { url, errorMessage });
+    await prisma.webhookDelivery.update({
+      where: { id: deliveryId },
+      data: { status: 'failed', attempts: attempt, nextRetryAt: null, errorMessage },
+    });
+    return;
+  }
+
   const signature = sign(secret, payload);
 
   let responseStatus: number | undefined;
