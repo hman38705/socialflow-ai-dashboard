@@ -3,6 +3,7 @@ import StellarSdk from '@stellar/stellar-sdk';
 const { Server, TransactionBuilder, Asset, Operation, Transaction, FeeBumpTransaction } = StellarSdk;
 import { NetworkConfig, NETWORKS, DEFAULT_NETWORK } from '../config/networks';
 import { OfflineQueue } from './OfflineQueue';
+import { createBrowserQueueStore } from './browserQueueStore';
 import { AppError } from '../../utils/AppError';
 import { ErrorCode } from '../../constants/ErrorCodes';
 
@@ -217,4 +218,4 @@ export class StellarService {
   }
 }
 
-export const stellarService = new StellarService();
+export const stellarService = new StellarService(DEFAULT_NETWORK, createBrowserQueueStore());
