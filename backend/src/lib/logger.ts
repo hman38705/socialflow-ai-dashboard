@@ -1,3 +1,19 @@
+/**
+ * logger.ts — Centralized application logging.
+ *
+ * Wraps Winston to provide a single, context-aware logger for the backend.
+ * The exported `createLogger(scope)` factory returns a `Logger` whose methods
+ * automatically attach the current request ID (via AsyncLocalStorage) and a
+ * module scope label, so callers only pass a message and optional metadata:
+ *
+ *   const log = createLogger('auth');
+ *   log.info('user logged in', { userId });
+ *
+ * Transports: console is always enabled; file logs (logs/error.log,
+ * logs/combined.log) are added in production; an Elasticsearch transport is
+ * added when ELASTICSEARCH_URL is configured. In production logs are emitted
+ * as JSON, otherwise as colorized human-readable lines.
+ */
 import winston from 'winston';
 import { getRequestId } from '../middleware/requestId';
 import { config } from '../config/config';
