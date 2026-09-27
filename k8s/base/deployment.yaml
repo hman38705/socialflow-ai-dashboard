@@ -79,11 +79,8 @@ spec:
             periodSeconds: 5
           readinessProbe:
             httpGet:
-              path: /health/ready
+              path: /health/readiness
               port: http
-              httpHeaders:
-                - name: Authorization
-                  value: Bearer ${HEALTH_CHECK_TOKEN}
             initialDelaySeconds: 10
             periodSeconds: 10
             failureThreshold: 3

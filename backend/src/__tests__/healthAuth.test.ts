@@ -65,10 +65,10 @@ beforeAll(() => {
 
 describe('Health Routes — Authorization Boundaries', () => {
   describe('Unauthorized Access (No Token)', () => {
-    it('GET /health/readiness returns 401 without token', async () => {
+    it('GET /health/readiness returns 200 without token (unauthenticated probe route)', async () => {
       const res = await request(app).get('/health/readiness');
-      expect(res.status).toBe(401);
-      expect(res.body.message).toBe('Unauthorized');
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('status');
     });
 
     it('GET /health/status returns 401 without token', async () => {

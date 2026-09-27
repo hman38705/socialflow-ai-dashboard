@@ -7,3 +7,4 @@ process.env.JWT_REFRESH_SECRET =
 process.env.CSRF_SECRET = process.env.CSRF_SECRET || 'test-csrf-secret-that-is-at-least-32-chars!!';
 process.env.TWITTER_API_KEY = process.env.TWITTER_API_KEY || 'test-key';
 process.env.TWITTER_API_SECRET = process.env.TWITTER_API_SECRET || 'test-secret';
+process.env.STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_placeholder';

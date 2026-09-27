@@ -113,7 +113,7 @@ const serviceParamSchema = z.object({
  *       503:
  *         description: Database unreachable or one or more integrations are disabled
  */
-router.get('/readiness', authenticate, async (req, res) => {
+router.get('/readiness', async (req, res) => {
   const integrations = getIntegrationSnapshot();
   if (!integrations) {
     return res.status(503).json({ status: 'starting', integrations: [] });
