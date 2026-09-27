@@ -33,6 +33,12 @@ const app = express();
 app.use(express.json());
 app.use('/admin', adminRouter);
 
+// Integration harness: mount the router at the real production path so the
+// test exercises the same HTTP surface the running app exposes.
+const mountedApp = express();
+mountedApp.use(express.json());
+mountedApp.use('/api/admin', adminRouter);
+
 const ADMIN_ENDPOINTS = [
   { method: 'get', path: '/admin/jobs/queues' },
   { method: 'post', path: '/admin/jobs/retry' },
@@ -71,5 +77,27 @@ describe('Admin routes RBAC', () => {
       .get('/admin/migrations')
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
+  });
+});
+
+describe('Admin routes mounted at /api/admin', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    RoleStore.assign('editor-user', 'editor');
+  });
+
+  it('requires users:manage permission on GET /api/admin/jobs/queues', async () => {
+    const res = await request(mountedApp)
+      .get('/api/admin/jobs/queues')
+      .set('x-test-user-id', 'editor-user');
+    expect(res.status).toBe(403);
+  });
+
+  it('returns queue data for an authorized caller on GET /api/admin/jobs/queues', async () => {
+    const res = await request(mountedApp)
+      .get('/api/admin/jobs/queues')
+      .set('x-test-user-id', 'admin-user');
+    expect(res.status).toBe(200);
+    expect(res.body).toBeDefined();
   });
 });

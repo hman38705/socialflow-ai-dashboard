@@ -11,6 +11,7 @@ import { errorHandler, notFoundHandler } from './middleware/error';
 import { initRateLimiters } from './middleware/rateLimit';
 import { sliMiddleware } from './middleware/sliMiddleware';
 import v1Router from './routes/v1';
+import adminRouter from './routes/admin';
 import metricsRouter from './routes/metrics';
 import { swaggerSpec } from './config/swagger';
 import { createApolloServer } from './graphql';
@@ -71,6 +72,12 @@ app.get('/api-docs.json', (_req: Request, res: Response) => res.json(swaggerSpec
 
 // Current stable version
 app.use('/api/v1', v1Router);
+
+// Admin router — job queues, migrations, cache-clear.
+// Mounted before the legacy /api alias so it is not shadowed by v1Router.
+// Auth/permission guard (authenticate + checkPermission('users:manage'))
+// is built into the router itself.
+app.use('/api/admin', adminRouter);
 
 // Legacy /api prefix — deprecated alias for backward compatibility.
 // Adds a Deprecation header so clients know to migrate to /api/v1.
