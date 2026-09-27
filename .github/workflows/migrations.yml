@@ -51,11 +51,7 @@ jobs:
         env:
           DATABASE_URL: postgresql://test:test@localhost:5432/test_db
         run: |
-          npx prisma migrate status
-          if [ $? -ne 0 ]; then
-            echo "ERROR: There are pending or failed Prisma migrations."
-            exit 1
-          fi
+          npx prisma migrate status || { echo "ERROR: There are pending or failed Prisma migrations."; exit 1; }
 
       - name: Run migrations
         working-directory: backend
