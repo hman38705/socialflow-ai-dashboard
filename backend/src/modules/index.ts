@@ -1,4 +1,3 @@
-import { healthRoutes } from './health';
 import { authRoutes } from './auth';
 import { organizationRoutes } from './organization';
 import { webhookRoutes } from './webhook';
@@ -17,9 +16,6 @@ import { postsRouter } from './posts';
  */
 
 export function registerModules(app: any): void {
-  // Health module
-  app.use('/api/health', healthRoutes);
-
   // Auth module
   app.use('/api/auth', authRoutes);
 

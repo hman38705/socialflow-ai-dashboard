@@ -25,4 +25,3 @@ export {
 export { AlertConfigService } from './services/alertConfigService';
 export type { HealthMetrics } from './services/healthMonitor';
 export type { AlertThreshold, ServiceAlertConfig } from './services/alertConfigService';
-export { default as healthRoutes } from './routes';
