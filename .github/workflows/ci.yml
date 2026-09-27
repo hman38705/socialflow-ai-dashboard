@@ -202,3 +202,46 @@ jobs:
 
       - name: Enforce coverage thresholds
         run: node .github/scripts/post-coverage-comment.mjs backend/coverage/coverage-summary.json
+
+  docker-build:
+    name: Docker Build & Prisma Migrate Smoke Test
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_USER: test
+          POSTGRES_PASSWORD: test
+          POSTGRES_DB: socialflow_test
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        ports:
+          - 5432:5432
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Build backend image
+        run: docker build -f backend/Dockerfile backend/ -t socialflow-backend:ci
+
+      - name: Build worker image
+        run: docker build -f backend/Dockerfile.worker backend/ -t socialflow-worker:ci
+
+      - name: Verify prisma migrate status (backend image)
+        run: |
+          docker run --rm \
+            --network host \
+            -e DATABASE_URL="postgresql://test:test@localhost:5432/socialflow_test" \
+            socialflow-backend:ci \
+            npx prisma migrate status
+
+      - name: Run prisma migrate deploy (backend image)
+        run: |
+          docker run --rm \
+            --network host \
+            -e DATABASE_URL="postgresql://test:test@localhost:5432/socialflow_test" \
+            socialflow-backend:ci \
+            npx prisma migrate deploy
