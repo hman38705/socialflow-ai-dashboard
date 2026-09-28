@@ -7,6 +7,8 @@ export interface SmsServiceConfig {
   authToken?: string;
   fromNumber?: string;
   maxRetries?: number;
+  /** Base delay before the first retry; doubles on each subsequent attempt. */
+  retryBaseDelayMs?: number;
 }
 
 export interface SmsResult {
@@ -38,11 +40,13 @@ export class SmsService {
   private fromNumber: string | undefined;
   private enabled: boolean;
   private maxRetries: number;
+  private retryBaseDelayMs: number;
 
   constructor(config: SmsServiceConfig) {
     this.enabled = !!(config.accountSid && config.authToken && config.fromNumber);
     this.fromNumber = config.fromNumber;
     this.maxRetries = config.maxRetries ?? 3;
+    this.retryBaseDelayMs = config.retryBaseDelayMs ?? 500;
 
     if (this.enabled) {
       try {
@@ -85,7 +89,13 @@ export class SmsService {
         if (!isTransient(error) || attempt === this.maxRetries) {
           break;
         }
-        logger.warn(`[sms-service] Transient error on attempt ${attempt}, retrying...`);
+        // Exponential backoff between transient retries so a Twilio outage
+        // isn't hammered with back-to-back requests (#1584)
+        const delay = this.retryBaseDelayMs * 2 ** (attempt - 1);
+        logger.warn(
+          `[sms-service] Transient error on attempt ${attempt}, retrying in ${delay}ms...`,
+        );
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
     }
 

@@ -1,5 +1,5 @@
 import { queueManager } from '../queues/queueManager';
-import { Worker } from 'bullmq';
+import { Worker, UnrecoverableError } from 'bullmq';
 import { moderate } from '../services/ModerationService';
 import { MODERATION_QUEUE_NAME, enqueueToDLQ } from '../queues/moderationQueue';
 import { getSmsService } from '../services/smsService';
@@ -200,11 +200,25 @@ async function processDeployContractJob(job: any) {
   };
 }
 
+// Notification channels that have no delivery service wired up yet
+const UNIMPLEMENTED_NOTIFICATION_CHANNELS = new Set(['push', 'in_app', 'webhook']);
+
 // Notification job processor
 async function processNotificationJob(job: any) {
   const { type, recipient, title: _title, message: _message, data: _data, metadata } = job.data;
 
   console.log(`Processing notification job ${job.id}: ${type} notification to ${recipient}`);
+
+  // Channels without a delivery implementation must fail the job rather than
+  // report success (#1585, #1586, #1587). Thrown before the circuit breaker so
+  // they don't trip it for working channels, and as UnrecoverableError so
+  // BullMQ moves the job straight to the failed set without pointless retries.
+  if (UNIMPLEMENTED_NOTIFICATION_CHANNELS.has(type)) {
+    logger.error(
+      `[notification-worker] Job ${job.id}: '${type}' notification channel is not implemented`,
+    );
+    throw new UnrecoverableError(`Notification channel not implemented: ${type}`);
+  }
 
   // Ensure the notification circuit breaker is registered
   circuitBreakerService.getBreaker('notification');
@@ -216,17 +230,8 @@ async function processNotificationJob(job: any) {
     async () => {
       // Route to appropriate notification service based on type
       switch (type) {
-        case 'push':
-          // await pushService.send(recipient, { title, body: message, data });
-          break;
         case 'sms':
           await getSmsService().send(recipient, _message);
-          break;
-        case 'in_app':
-          // await inAppService.create(recipient, { title, message, data });
-          break;
-        case 'webhook':
-          // await webhookService.send(recipient, { title, message, ...data });
           break;
         case 'slack':
           // await slackService.send(recipient, message);
