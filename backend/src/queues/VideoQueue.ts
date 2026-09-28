@@ -1,151 +1,79 @@
+import { Queue } from 'bullmq';
 import { createLogger } from '../lib/logger';
-import {
-  videoTranscodeJobsTotal,
-  videoTranscodeJobDurationSeconds,
-} from '../lib/metrics';
+import { getNumber, getRedisConnection } from '../config/runtime';
 
 const logger = createLogger('VideoQueue');
 
-interface QueueJob {
-  id: string;
-  priority: number;
-  addedAt: Date;
-  startedAt?: Date;
-  processor: () => Promise<void>;
-  resolve: () => void;
-  reject: (err: unknown) => void;
-}
+export const VIDEO_TRANSCODE_QUEUE_NAME = 'video-transcoding';
 
 /**
- * High CPU worker queue for video transcoding
- * Processes jobs sequentially to avoid overwhelming the CPU
+ * Cluster-wide cap on concurrent CPU-heavy transcodes. Enforced by BullMQ's
+ * Redis-backed global concurrency, so it holds across all pods, not per process.
  */
-class VideoQueue {
-  private queue: QueueJob[] = [];
-  private processing = false;
-  private maxConcurrent = 1; // Process one video at a time for CPU-intensive tasks
-  private activeJobs = 0;
-  private pendingMaxConcurrent: number | null = null;
+const DEFAULT_MAX_CONCURRENT = getNumber(process.env.VIDEO_MAX_CONCURRENT_TRANSCODES, 1);
 
-  /**
-   * Add a job to the queue.
-   * Returns a promise that resolves (or rejects) when the job finishes.
-   */
-  public addJob(
-    jobId: string,
-    processor: () => Promise<void>,
-    priority: number = 0,
-  ): Promise<void> {
-    return new Promise<void>((resolve, reject) => {
-      const queueJob: QueueJob = {
-        id: jobId,
-        priority,
-        addedAt: new Date(),
-        processor,
-        resolve,
-        reject,
-      };
+let _queue: Queue | null = null;
 
-      // Insert job based on priority (higher priority first)
-      const insertIndex = this.queue.findIndex((job) => job.priority < priority);
-      if (insertIndex === -1) {
-        this.queue.push(queueJob);
-      } else {
-        this.queue.splice(insertIndex, 0, queueJob);
-      }
-
-      logger.info(`Job ${jobId} added to queue`, { priority });
-
-      // Start processing if not already running
-      if (!this.processing) {
-        this.processQueue();
-      }
+/**
+ * Redis-backed (BullMQ) queue for video transcoding jobs.
+ * Jobs are persisted in Redis, so queued and in-flight work survives restarts.
+ */
+export function getVideoTranscodeQueue(): Queue {
+  if (!_queue) {
+    _queue = new Queue(VIDEO_TRANSCODE_QUEUE_NAME, {
+      connection: getRedisConnection(),
+      defaultJobOptions: {
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 5000 },
+        removeOnComplete: { age: 86400 },
+        removeOnFail: { age: 604800 },
+      },
     });
   }
+  return _queue;
+}
 
+class VideoQueue {
   /**
-   * Process jobs in the queue
+   * Apply the configured cluster-wide concurrency limit (call on worker startup)
    */
-  private async processQueue(): Promise<void> {
-    if (this.processing) {
-      return;
-    }
-
-    this.processing = true;
-
-    while (this.queue.length > 0 && this.activeJobs < this.maxConcurrent) {
-      const job = this.queue.shift();
-      if (!job) {
-        break;
-      }
-
-      this.activeJobs++;
-      job.startedAt = new Date();
-
-      logger.info(`Starting job ${job.id}`, { queueLength: this.queue.length });
-
-      const startTime = process.hrtime.bigint();
-      let status = 'failed';
-
-      try {
-        await job.processor();
-        status = 'succeeded';
-        logger.info(`Job ${job.id} completed successfully`);
-        job.resolve();
-      } catch (error) {
-        logger.error(`Job ${job.id} failed`, { error });
-        job.reject(error);
-      } finally {
-        const durationSeconds = Number(process.hrtime.bigint() - startTime) / 1e9;
-        videoTranscodeJobsTotal.inc({ status });
-        videoTranscodeJobDurationSeconds.observe({ status }, durationSeconds);
-
-        this.activeJobs--;
-        if (this.activeJobs === 0 && this.pendingMaxConcurrent !== null) {
-          this.maxConcurrent = this.pendingMaxConcurrent;
-          this.pendingMaxConcurrent = null;
-          logger.info(`Applied pending maxConcurrent: ${this.maxConcurrent}`);
-        }
-      }
-    }
-
-    this.processing = false;
-
-    // Continue processing if there are more jobs
-    if (this.queue.length > 0) {
-      this.processQueue();
-    }
+  public async applyConcurrencyLimit(): Promise<void> {
+    await this.setMaxConcurrent(DEFAULT_MAX_CONCURRENT);
   }
 
   /**
-   * Get queue status
+   * Get queue status, read from Redis so it reflects every pod
    */
-  public getStatus() {
+  public async getStatus() {
+    const queue = getVideoTranscodeQueue();
+    const [waiting, active, delayed, globalConcurrency, jobs] = await Promise.all([
+      queue.getWaitingCount(),
+      queue.getActiveCount(),
+      queue.getDelayedCount(),
+      queue.getGlobalConcurrency(),
+      queue.getWaiting(0, 49),
+    ]);
+
     return {
-      queueLength: this.queue.length,
-      activeJobs: this.activeJobs,
-      maxConcurrent: this.maxConcurrent,
-      jobs: this.queue.map((job) => ({
+      queueLength: waiting + delayed,
+      activeJobs: active,
+      maxConcurrent: globalConcurrency ?? DEFAULT_MAX_CONCURRENT,
+      jobs: jobs.map((job) => ({
         id: job.id,
-        priority: job.priority,
-        addedAt: job.addedAt,
+        priority: job.opts.priority ?? 0,
+        addedAt: new Date(job.timestamp),
       })),
     };
   }
 
   /**
-   * Set max concurrent jobs.
-   * If jobs are currently active, the new limit is deferred until they drain.
+   * Set the max number of transcodes running concurrently across the cluster.
+   * Active jobs are not interrupted; the new limit applies to subsequent pickups.
    */
-  public setMaxConcurrent(max: number): void {
+  public async setMaxConcurrent(max: number): Promise<void> {
     const clamped = Math.max(1, max);
-    if (this.activeJobs === 0) {
-      this.maxConcurrent = clamped;
-      this.pendingMaxConcurrent = null;
-    } else {
-      this.pendingMaxConcurrent = clamped;
-      logger.info(`Deferring maxConcurrent change to ${clamped} until active jobs drain`);
-    }
+    await getVideoTranscodeQueue().setGlobalConcurrency(clamped);
+    logger.info(`Video transcode global concurrency set to ${clamped}`);
   }
 }
 

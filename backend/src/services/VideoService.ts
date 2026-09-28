@@ -1,7 +1,7 @@
 import ffmpeg from 'fluent-ffmpeg';
 import path from 'path';
 import fs from 'fs/promises';
-import { Queue, Worker, Job } from 'bullmq';
+import { Worker, Job } from 'bullmq';
 import {
   TranscodingJob,
   VideoQuality,
@@ -17,6 +17,11 @@ import {
   videoTranscodeJobsTotal,
   videoTranscodeJobDurationSeconds,
 } from '../lib/metrics';
+import {
+  VIDEO_TRANSCODE_QUEUE_NAME,
+  getVideoTranscodeQueue,
+  videoQueue,
+} from '../queues/VideoQueue';
 
 const logger = createLogger('VideoService');
 
@@ -38,7 +43,7 @@ function assertSupportedFormat(inputPath: string): void {
   }
 }
 
-const QUEUE_NAME = 'video-transcoding';
+const QUEUE_NAME = VIDEO_TRANSCODE_QUEUE_NAME;
 
 interface VideoJobPayload {
   jobId: string;
@@ -62,23 +67,9 @@ const DEFAULT_FORMATS: VideoFormat[] = [
   { extension: 'webm', codec: 'libvpx-vp9', audioCodec: 'libopus' },
 ];
 
-let _queue: Queue | null = null;
 let _worker: Worker | null = null;
 
-function getQueue(): Queue {
-  if (!_queue) {
-    _queue = new Queue(QUEUE_NAME, {
-      connection: getRedisConnection(),
-      defaultJobOptions: {
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 5000 },
-        removeOnComplete: { age: 86400 },
-        removeOnFail: { age: 604800 },
-      },
-    });
-  }
-  return _queue;
-}
+const getQueue = getVideoTranscodeQueue;
 
 export async function transcodeVideo(
   job: TranscodingJob,
@@ -198,6 +189,12 @@ export function startVideoWorker(): void {
 
   _worker = new Worker(QUEUE_NAME, processVideoJob, { connection: getRedisConnection(), concurrency: 1 });
 
+  // Per-worker concurrency only bounds this pod; the Redis-backed global
+  // concurrency limit caps transcodes across every replica.
+  videoQueue.applyConcurrencyLimit().catch((err: Error) => {
+    logger.error('Failed to apply video transcode concurrency limit', { error: err.message });
+  });
+
   _worker.on('completed', (job) => logger.info(`Video job completed`, { jobId: job.id }));
   _worker.on('failed', (job, err) => {
     logger.error(`Video job failed`, { jobId: job?.id, error: err.message });
@@ -277,4 +274,5 @@ class VideoService {
   }
 }
 
-export default new VideoService();
+export const videoService = new VideoService();
+export default videoService;

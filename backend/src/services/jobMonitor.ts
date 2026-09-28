@@ -44,35 +44,47 @@ export interface SystemStats {
 export class JobMonitor {
   private eventListeners: Map<string, ((...args: unknown[]) => void)[]> = new Map();
 
+  private monitoredQueues: Set<string> = new Set();
+
   constructor() {
     this.setupGlobalListeners();
   }
 
   /**
-   * Setup global event listeners for all queues
+   * Attach listeners to every existing queue, and to any queue created later.
+   * Queues are created at import time of their defining modules, so a one-time
+   * snapshot here would silently miss queues imported after this module.
    */
   private setupGlobalListeners() {
-    const queueNames = queueManager.getQueueNames();
+    queueManager.getQueueNames().forEach((name) => this.attachQueueListeners(name));
+    queueManager.on('queue-created', (name: string) => this.attachQueueListeners(name));
+  }
 
-    queueNames.forEach((name) => {
-      const events = queueManager.getQueueEvents(name);
-      if (events) {
-        events.on('completed', ({ jobId, returnvalue }) => {
-          this.emit('job-completed', { queue: name, jobId, returnvalue });
-        });
+  /**
+   * Forward BullMQ queue events for a single queue (idempotent per queue name)
+   */
+  private attachQueueListeners(name: string) {
+    if (this.monitoredQueues.has(name)) return;
 
-        events.on('failed', ({ jobId, failedReason }) => {
-          this.emit('job-failed', { queue: name, jobId, failedReason });
-        });
+    const events = queueManager.getQueueEvents(name);
+    if (!events) return;
 
-        events.on('stalled', ({ jobId }) => {
-          this.emit('job-stalled', { queue: name, jobId });
-        });
+    this.monitoredQueues.add(name);
 
-        events.on('progress', ({ jobId, data }) => {
-          this.emit('job-progress', { queue: name, jobId, progress: data });
-        });
-      }
+    events.on('completed', ({ jobId, returnvalue }) => {
+      this.emit('job-completed', { queue: name, jobId, returnvalue });
+    });
+
+    events.on('failed', ({ jobId, failedReason }) => {
+      this.emit('job-failed', { queue: name, jobId, failedReason });
+    });
+
+    events.on('stalled', ({ jobId }) => {
+      this.emit('job-stalled', { queue: name, jobId });
+    });
+
+    events.on('progress', ({ jobId, data }) => {
+      this.emit('job-progress', { queue: name, jobId, progress: data });
     });
   }
 

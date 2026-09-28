@@ -14,8 +14,17 @@ const ownsJob = (jobId: string, userId: string | undefined) =>
   !!userId && jobOwners.get(jobId) === userId;
 
 /**
- * GET /api/video/health
- * Check video service health (FFmpeg availability) — intentionally unauthenticated
+ * @openapi
+ * /video/health:
+ *   get:
+ *     tags: [Video]
+ *     summary: Check video service health (FFmpeg availability)
+ *     security: []
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *       503:
+ *         description: Service is unhealthy
  */
 router.get('/health', async (req: Request, res: Response) => {
   try {
@@ -66,8 +75,40 @@ const upload = multer({
 });
 
 /**
- * POST /api/video/upload
- * Upload a video and start transcoding
+ * @openapi
+ * /video/upload:
+ *   post:
+ *     tags: [Video]
+ *     summary: Upload a video and start transcoding
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         multipart/form-data:
+ *           schema:
+ *             type: object
+ *             required: [video]
+ *             properties:
+ *               video:
+ *                 type: string
+ *                 format: binary
+ *                 description: Video file (mp4, mpeg, mov, avi, webm — max 500 MB)
+ *               options:
+ *                 type: string
+ *                 description: JSON-encoded transcoding options
+ *     responses:
+ *       202:
+ *         description: Transcoding job queued
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 jobId: { type: string }
+ *                 status: { type: string }
+ *       400:
+ *         description: No video file provided
+ *       500:
+ *         description: Upload failed
  */
 router.post('/upload', upload.single('video'), async (req: AuthRequest, res: Response) => {
   try {
@@ -94,8 +135,40 @@ router.post('/upload', upload.single('video'), async (req: AuthRequest, res: Res
 });
 
 /**
- * GET /api/video/job/:jobId
- * Get transcoding job status
+ * @openapi
+ * /video/job/{jobId}:
+ *   get:
+ *     tags: [Video]
+ *     summary: Get transcoding job status
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Job details
+ *         content:
+ *           application/json:
+ *             schema:
+ *               $ref: '#/components/schemas/VideoJob'
+ *       404:
+ *         description: Job not found
+ *   delete:
+ *     tags: [Video]
+ *     summary: Cancel a transcoding job
+ *     parameters:
+ *       - in: path
+ *         name: jobId
+ *         required: true
+ *         schema:
+ *           type: string
+ *     responses:
+ *       200:
+ *         description: Job cancelled
+ *       404:
+ *         description: Job not found
  */
 router.get('/job/:jobId', async (req: AuthRequest, res: Response) => {
   const { jobId } = req.params;
@@ -109,8 +182,23 @@ router.get('/job/:jobId', async (req: AuthRequest, res: Response) => {
 });
 
 /**
- * GET /api/video/jobs
- * Get all transcoding jobs
+ * @openapi
+ * /video/jobs:
+ *   get:
+ *     tags: [Video]
+ *     summary: List the caller's transcoding jobs
+ *     responses:
+ *       200:
+ *         description: Array of jobs
+ *         content:
+ *           application/json:
+ *             schema:
+ *               type: object
+ *               properties:
+ *                 jobs:
+ *                   type: array
+ *                   items:
+ *                     $ref: '#/components/schemas/VideoJob'
  */
 router.get('/jobs', async (req: AuthRequest, res: Response) => {
   const jobs = (await videoService.getAllJobs()).filter((j) => ownsJob(j.id, req.user?.id));
@@ -133,12 +221,22 @@ router.delete('/job/:jobId', async (req: AuthRequest, res: Response) => {
 });
 
 /**
- * GET /api/video/queue/status
- * Get queue status
+ * @openapi
+ * /video/queue/status:
+ *   get:
+ *     tags: [Video]
+ *     summary: Get cluster-wide video transcode queue status
+ *     responses:
+ *       200:
+ *         description: Queue status
  */
-router.get('/queue/status', (req: Request, res: Response) => {
-  const status = videoQueue.getStatus();
-  res.json(status);
+router.get('/queue/status', async (req: Request, res: Response) => {
+  try {
+    const status = await videoQueue.getStatus();
+    res.json(status);
+  } catch (_error) {
+    res.status(500).json({ error: 'Failed to get queue status' });
+  }
 });
 
 export default router;

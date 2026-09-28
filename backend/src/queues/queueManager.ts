@@ -1,3 +1,4 @@
+import { EventEmitter } from 'events';
 import { Queue, Worker, QueueEvents, JobsOptions, ConnectionOptions } from 'bullmq';
 import Redis from 'ioredis';
 import { config } from '../config/config';
@@ -92,9 +93,12 @@ export interface QueueConfig {
 
 /**
  * QueueManager - Centralized queue management for BullMQ
- * Handles creation, lifecycle, and monitoring of all job queues
+ * Handles creation, lifecycle, and monitoring of all job queues.
+ *
+ * Emits 'queue-created' (name: string, queue: Queue, events: QueueEvents) whenever
+ * a new queue is registered, so observers can attach to queues created later.
  */
-export class QueueManager {
+export class QueueManager extends EventEmitter {
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
@@ -139,6 +143,7 @@ export class QueueManager {
 
     this.queues.set(name, queue);
     logger.info(`Queue "${name}" created`, { queueName: name });
+    this.emit('queue-created', name, queue, queueEvents);
 
     return queue;
   }

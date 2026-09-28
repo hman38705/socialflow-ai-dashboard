@@ -257,6 +257,50 @@ export async function attemptDelivery(
         errorMessage,
       },
     });
-    logger.info(`Deliv
+    logger.info(`Delivery ${deliveryId} scheduled for retry`, { nextRetryAt, attempt });
+  } else {
+    await prisma.webhookDelivery.update({
+      where: { id: deliveryId },
+      data: {
+        status: 'failed',
+        attempts: attempt,
+        nextRetryAt: null,
+        responseStatus: responseStatus ?? null,
+        responseBody: responseBody ?? null,
+        errorMessage,
+      },
+    });
+    logger.error(`Delivery ${deliveryId} permanently failed after ${attempt} attempts`, { url });
+  }
+}
 
-/* … truncated 1453 chars — edit only what you need near the top … */
+/**
+ * Retry worker — call this on a cron/interval to re-attempt pending deliveries.
+ */
+export async function retryPendingDeliveries(): Promise<void> {
+  const due = await prisma.webhookDelivery.findMany({
+    where: { status: 'pending', nextRetryAt: { lte: new Date() } },
+    include: { subscription: true },
+    take: 50,
+  });
+
+  logger.info(`Retrying ${due.length} pending deliveries`);
+
+  await Promise.all(
+    due.map(async (d) => {
+      const secret = await resolveSigningSecret(d.id, d.subscription.secret);
+      if (secret === null) return;
+
+      await attemptDelivery(d.id, d.subscription.url, secret, d.payload, d.attempts + 1).catch(
+        (err) => {
+          logger.error('Unexpected error in fire-and-forget retry delivery', {
+            deliveryId: d.id,
+            subscriptionId: d.subscription.id,
+            err,
+          });
+          webhookDispatchFailed.inc({ subscription_id: d.subscription.id });
+        },
+      );
+    }),
+  );
+}
