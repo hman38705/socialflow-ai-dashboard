@@ -1,5 +1,5 @@
 // Jobs exports
-export { processCohortJob } from './cohortJob';
+export { processCohortJob, createCohortWorker } from './cohortJob';
 export {
   initializeWorkers,
   workerConfigs,

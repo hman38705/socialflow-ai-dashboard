@@ -5,6 +5,11 @@ export const COHORT_QUEUE_NAME = 'cohort';
 export interface CohortJobData {
   organizationId?: string; // omit for global recompute
   triggeredBy?: 'daily' | 'weekly' | 'manual';
+  /**
+   * Set internally by the weekly job when it starts waiting for the daily
+   * job on Monday; preserved across delayed re-runs to bound the total wait.
+   */
+  waitStartedAt?: string;
 }
 
 export const cohortQueue = queueManager.createQueue(COHORT_QUEUE_NAME, {

@@ -97,6 +97,7 @@ export interface QueueConfig {
 export class QueueManager {
   private queues: Map<string, Queue> = new Map();
   private workers: Map<string, Worker> = new Map();
+  private workerProcessors: Map<string, (job: any, token?: string) => Promise<any>> = new Map();
   private queueEvents: Map<string, QueueEvents> = new Map();
 
   /**
@@ -144,15 +145,32 @@ export class QueueManager {
   }
 
   /**
-   * Create a worker for processing jobs
+   * Create a worker for processing jobs.
+   *
+   * Only one worker is kept per queue name. If a worker is already registered
+   * for `name`, it is returned unchanged and the `processor` passed here is NOT
+   * attached — a warning is logged when that processor differs from the
+   * registered one so ordering/registration conflicts are visible.
    */
   createWorker(
     name: string,
-    processor: (job: any) => Promise<any>,
+    processor: (job: any, token?: string) => Promise<any>,
     options: { concurrency?: number; limiter?: any } = {},
   ): Worker {
-    if (this.workers.has(name)) {
-      return this.workers.get(name)!;
+    const existing = this.workers.get(name);
+    if (existing) {
+      const registered = this.workerProcessors.get(name);
+      if (registered !== processor) {
+        logger.warn(
+          `Worker for queue "${name}" is already registered; ignoring new processor`,
+          {
+            queueName: name,
+            registeredProcessor: registered?.name || '<anonymous>',
+            ignoredProcessor: processor.name || '<anonymous>',
+          },
+        );
+      }
+      return existing;
     }
 
     const worker = new Worker(name, processor, {
@@ -187,6 +205,7 @@ export class QueueManager {
     });
 
     this.workers.set(name, worker);
+    this.workerProcessors.set(name, processor);
     logger.info(`Worker for queue "${name}" created`, { queueName: name });
 
     return worker;

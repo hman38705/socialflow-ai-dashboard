@@ -33,15 +33,24 @@ function deriveTransactionHash(data: {
 }
 
 /**
- * Payout job processor
- * Handles processing payouts with retry logic and error handling
+ * Execute a single payout with validation, locking, idempotency and
+ * failure persistence. Shared by the single-payout and batch processors so
+ * both paths get identical duplicate-payment protection.
  *
  * Idempotency for Stellar/crypto transactions:
  * Before submitting a Stellar transaction the hash is stored in the
  * PayoutTransaction table. On retry the job checks whether the hash
  * already exists and skips submission, preventing duplicate payouts.
+ *
+ * @param idempotencyKey Scopes the transaction hash and lock. For single
+ *   payouts this is the BullMQ job id; for batches it is the batch job id,
+ *   so identical entries within a batch (or a retried batch) collide.
  */
-export async function processPayoutJob(job: Job<PayoutJobData>) {
+async function executePayout(
+  data: PayoutJobData,
+  idempotencyKey: string,
+  updateProgress: (progress: number) => Promise<unknown>,
+) {
   const {
     groupId,
     amount,
@@ -50,16 +59,22 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     currency,
     description: _description,
     metadata,
-  } = job.data;
+  } = data;
 
-  logger.info(`Processing job ${job.id}`, { jobId: job.id, groupId, amount, currency, recipient });
+  logger.info(`Processing payout ${idempotencyKey}`, {
+    jobId: idempotencyKey,
+    groupId,
+    amount,
+    currency,
+    recipient,
+  });
 
   payoutJobAttemptedTotal.inc();
   const endTimer = payoutJobDurationSeconds.startTimer();
 
   try {
     // Log job progress
-    await job.updateProgress(10);
+    await updateProgress(10);
 
     // Validate payout data
     if (
@@ -77,13 +92,13 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
       throw new Error('Payout amount must be greater than 0');
     }
 
-    await job.updateProgress(20);
+    await updateProgress(20);
 
     // ── Row-level lock ─────────────────────────────────────────────────────
     // Acquire an exclusive distributed lock keyed to the payout group/job so
     // that concurrent triggers (e.g. manual retry + scheduled run) cannot
     // both read a pending record and initiate duplicate transfers.
-    const result = await LockService.withLock(`payout:${groupId}:${job.id ?? 'unknown'}`, async () => {
+    const result = await LockService.withLock(`payout:${groupId}:${idempotencyKey}`, async () => {
       // ── Stellar / crypto idempotency check ──────────────────────────────
       let transactionHash: string | undefined;
       let skipped = false;
@@ -94,7 +109,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
           amount,
           recipient,
           currency,
-          jobId: job.id ?? 'unknown',
+          jobId: idempotencyKey,
         });
 
         const existing = await prisma.payoutTransaction.findUnique({
@@ -102,8 +117,8 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
         });
 
         if (existing) {
-          logger.info(`Duplicate detected for job ${job.id} — skipping submission`, {
-            jobId: job.id,
+          logger.info(`Duplicate detected for payout ${idempotencyKey} — skipping submission`, {
+            jobId: idempotencyKey,
             existingTransactionId: existing.id,
           });
           skipped = true;
@@ -115,7 +130,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
               amount,
               currency,
               transactionHash,
-              jobId: job.id ?? 'unknown',
+              jobId: idempotencyKey,
               status: 'pending',
             },
           });
@@ -125,7 +140,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
       // ── Payment processing ───────────────────────────────────────────────
       if (!skipped) {
         await new Promise((resolve) => setTimeout(resolve, 500));
-        await job.updateProgress(80);
+        await updateProgress(80);
 
         if (recipientType === 'crypto' || recipientType === 'wallet') {
           await new Promise((resolve) => setTimeout(resolve, 200));
@@ -139,10 +154,10 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
         }
       }
 
-      await job.updateProgress(95);
+      await updateProgress(95);
 
-      logger.info(`Job ${job.id} completed successfully`, {
-        jobId: job.id,
+      logger.info(`Payout ${idempotencyKey} completed successfully`, {
+        jobId: idempotencyKey,
         amount,
         currency,
         recipient,
@@ -151,7 +166,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
 
       return {
         success: true,
-        transactionId: job.id,
+        transactionId: idempotencyKey,
         transactionHash,
         groupId,
         amount,
@@ -171,7 +186,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     return result;
   } catch (error: any) {
     const reason = error.message as string;
-    logger.error(`Job ${job.id} failed`, { jobId: job.id, reason });
+    logger.error(`Payout ${idempotencyKey} failed`, { jobId: idempotencyKey, reason });
 
     payoutJobFailedTotal.inc();
     endTimer();
@@ -179,7 +194,7 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
     try {
       await prisma.payoutFailure.create({
         data: {
-          jobId: job.id ?? 'unknown',
+          jobId: idempotencyKey,
           groupId: groupId ?? 'unknown',
           recipient: recipient ?? 'unknown',
           amount: amount ?? 0,
@@ -189,13 +204,23 @@ export async function processPayoutJob(job: Job<PayoutJobData>) {
       });
     } catch (dbErr: any) {
       logger.error('Failed to persist payout failure record', {
-        jobId: job.id,
+        jobId: idempotencyKey,
         error: dbErr.message,
       });
     }
 
     throw new Error(`Failed to process payout: ${reason}`);
   }
+}
+
+/**
+ * Payout job processor
+ * Handles processing payouts with retry logic and error handling
+ */
+export async function processPayoutJob(job: Job<PayoutJobData>) {
+  return executePayout(job.data, job.id ?? 'unknown', (progress) =>
+    job.updateProgress(progress),
+  );
 }
 
 /**
@@ -208,16 +233,24 @@ export function createPayoutWorker() {
 }
 
 /**
- * Process batch payout job
+ * Process batch payout job.
+ *
+ * Each entry goes through the same validated, locked and idempotent path as
+ * a single payout (executePayout), keyed on the batch job id. Duplicate
+ * entries in the same batch — or entries already paid by an earlier attempt
+ * of this batch job — are detected and skipped rather than paid again.
  */
 export async function processBatchPayoutJob(job: Job<{ payouts: PayoutJobData[] }>) {
   const { payouts } = job.data;
+  const batchKey = job.id ?? 'unknown';
 
   logger.info(`Processing batch job ${job.id}`, { jobId: job.id, payoutCount: payouts.length });
 
   const results: Array<{
     success: boolean;
+    skipped?: boolean;
     transactionId?: string;
+    transactionHash?: string;
     recipient?: string;
     error?: string;
   }> = [];
@@ -229,25 +262,23 @@ export async function processBatchPayoutJob(job: Job<{ payouts: PayoutJobData[] 
     const payout = payouts[i];
 
     try {
-      // Validate payout
-      if (!payout.groupId || !payout.amount || !payout.recipient) {
-        throw new Error('Missing required payout fields');
+      if (typeof payout.amount === 'number') {
+        totalAmount += payout.amount;
       }
 
-      totalAmount += payout.amount;
+      const result = await executePayout(payout, batchKey, async () => undefined);
 
-      // Simulate processing
-      await new Promise((resolve) => setTimeout(resolve, 300));
-
-      successfulAmount += payout.amount;
+      if (!result.skipped) {
+        successfulAmount += payout.amount;
+      }
 
       results.push({
         success: true,
-        transactionId: `${job.id}-${i}`,
+        skipped: result.skipped,
+        transactionId: `${batchKey}-${i}`,
+        transactionHash: result.transactionHash,
         recipient: payout.recipient,
       });
-
-      await job.updateProgress(Math.floor(((i + 1) / payouts.length) * 100));
     } catch (error: any) {
       results.push({
         success: false,
@@ -255,14 +286,18 @@ export async function processBatchPayoutJob(job: Job<{ payouts: PayoutJobData[] 
         error: error.message,
       });
     }
+
+    await job.updateProgress(Math.floor(((i + 1) / payouts.length) * 100));
   }
 
   const successful = results.filter((r) => r.success).length;
+  const skipped = results.filter((r) => r.skipped).length;
   const failed = results.filter((r) => !r.success).length;
 
   logger.info(`Batch job ${job.id} completed`, {
     jobId: job.id,
     successful,
+    skipped,
     successfulAmount,
     failed,
   });
@@ -287,6 +322,7 @@ export async function processBatchPayoutJob(job: Job<{ payouts: PayoutJobData[] 
     jobId: job.id,
     totalPayouts: payouts.length,
     successfulPayouts: successful,
+    skippedPayouts: skipped,
     failedPayouts: failed,
     totalAmount,
     successfulAmount,
