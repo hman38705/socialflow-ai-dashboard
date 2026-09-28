@@ -1,10 +1,10 @@
 import { Router, Request, Response } from 'express';
 import multer from 'multer';
 import path from 'path';
-import { videoService } from '../../services/VideoService';
-import { videoQueue } from '../../queues/VideoQueue';
-import { videoHealthService } from '../../services/VideoHealthService';
-import { authMiddleware, AuthRequest } from '../../middleware/authMiddleware';
+import { videoService } from '../../../services/VideoService';
+import { videoQueue } from '../../../queues/VideoQueue';
+import { videoHealthService } from '../../../services/VideoHealthService';
+import { authMiddleware, AuthRequest } from '../../auth/middleware/authMiddleware';
 
 const router = Router();
 

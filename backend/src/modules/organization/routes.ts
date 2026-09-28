@@ -1,24 +1,15 @@
 import { Router } from 'express';
-import { authMiddleware } from '../middleware/authMiddleware';
-import {
-  createOrganization,
-  listOrganizations,
-  getOrganization,
-  addMember,
-  removeMember,
-  switchOrganization,
-} from '../controllers/organization';
+import { authenticate } from '../auth/middleware/authMiddleware';
+import * as organizationController from './controllers/organization';
 
 const router = Router();
 
-// All org routes require authentication
-router.use(authMiddleware);
+router.use(authenticate);
 
-router.post('/', createOrganization);
-router.get('/', listOrganizations);
-router.post('/switch', switchOrganization);
-router.get('/:orgId', getOrganization);
-router.post('/:orgId/members', addMember);
-router.delete('/:orgId/members/:userId', removeMember);
+router.get('/', organizationController.listOrganizations);
+router.get('/:id', organizationController.getOrganization);
+router.post('/', organizationController.createOrganization);
+router.put('/:id', organizationController.updateOrganization);
+router.delete('/:id', organizationController.deleteOrganization);
 
 export default router;

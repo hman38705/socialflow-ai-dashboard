@@ -14,5 +14,11 @@
  *
  * Public API surface: `organizationRoutes` (the module's Express router),
  * re-exported below for mounting by the application.
+ *
+ * Note: `routes.roles.ts` is intentionally NOT wired in here. Its relative
+ * imports (`../middleware/*`, `../models/*`) do not resolve from this module
+ * directory, so requiring it would throw `Cannot find module` at load time.
+ * It stays dormant until those imports are corrected and it is explicitly
+ * mounted.
  */
 export { default as organizationRoutes } from './routes';
