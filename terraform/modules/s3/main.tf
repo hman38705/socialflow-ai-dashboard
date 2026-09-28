@@ -41,8 +41,8 @@ resource "aws_s3_bucket_lifecycle_configuration" "main" {
     status = "Enabled"
     filter { prefix = "backups/" }
 
-    # Remove current backup objects after 30 days
-    expiration { days = 30 }
+    # Remove current backup objects after 90 days in prod, 30 days elsewhere
+    expiration { days = var.env == "prod" ? 90 : 30 }
 
     # Remove non-current versions (after versioning overwrites) after 90 days
     noncurrent_version_expiration { noncurrent_days = 90 }
