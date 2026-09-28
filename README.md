@@ -540,3 +540,8 @@ curl -v http://localhost:3001/health
 **General check fails in production** — the Redis store is shared across instances. If multiple replicas are running, the 100-request budget is consumed across all of them. Run the script against a single isolated instance or a staging environment with one replica.
 
 **429 body is not JSON** — a reverse proxy (nginx, ALB) may be intercepting and returning its own 429 before the request reaches the app. Check proxy rate-limit configuration.
+
+## Handsoff notes
+
+<!-- handsoff-issue-1620 -->
+- #1620: [Bug] backend/src/scripts/data-pruning.ts CLI entrypoint has zero test coverage
