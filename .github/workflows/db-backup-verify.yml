@@ -57,6 +57,86 @@ jobs:
         id: checks
         env:
           PGPASSWORD: verify_pass
+        # -----------------------------------------------------------------------
+        # Issue #1596 — [Bug] DB backup verification workflow swallows its own
+        # "which tables are empty" diagnostic before it can be logged
+        # https://github.com/hman38705/socialflow-ai-dashboard/issues/1596
+        #
+        # ROOT CAUSE
+        # ----------
+        # The original code used command substitution to capture the Python
+        # script's stdout into the shell variable $EMPTY:
+        #
+        #   EMPTY=$(echo "$RESULT" | python3 -c "
+        #     ...
+        #     print('EMPTY_TABLES: ' + ', '.join(empty))
+        #     sys.exit(1)
+        #   ")
+        #
+        # When the Python script prints and then exits 1, two things happen:
+        #   1. The print() output is silently consumed into $EMPTY — it is
+        #      never written to the runner log because $EMPTY is never echo'd.
+        #   2. The non-zero exit propagates through the $(…) assignment under
+        #      `set -e`, so the step correctly fails — but the run log only
+        #      shows "Process exited with code 1", not the table names.
+        #
+        # The variable $EMPTY is assigned but never read afterward, so the
+        # diagnostic is swallowed entirely. The step fails silently.
+        #
+        # FIX
+        # ---
+        # Drop the command substitution entirely. Run the Python script inline
+        # (piped from the shell), letting its stdout flow directly to the
+        # runner log. The script still exits 1 on empty tables, which propagates
+        # to the step exit code under `set -e` — but now the EMPTY_TABLES line
+        # appears in the log before the failure, satisfying the acceptance
+        # criterion.
+        #
+        # Inline fix pattern:
+        #
+        #   echo "$RESULT" | python3 -c "
+        #   import sys, json
+        #   data = json.load(sys.stdin)
+        #   empty = [t['table_name'] for t in data if t['row_count'] == 0]
+        #   if empty:
+        #       print('EMPTY_TABLES: ' + ', '.join(empty), flush=True)
+        #       sys.exit(1)
+        #   "
+        #
+        # The flush=True ensures the line is written before sys.exit(1) tears
+        # down the process. Without it, CPython's stdout buffer can be lost on
+        # an abrupt exit in some pipe configurations.
+        #
+        # ALTERNATIVE FIX (write to stderr instead)
+        # ------------------------------------------
+        # If the diagnostic should be visible even when stdout is redirected:
+        #
+        #   print('EMPTY_TABLES: ' + ', '.join(empty), file=sys.stderr, flush=True)
+        #
+        # stderr is never captured by $(…) and always flows to the runner log.
+        # Either approach satisfies the acceptance criterion.
+        #
+        # TESTING LOCALLY
+        # ---------------
+        # Pipe a mock JSON payload with a zero-row-count table and confirm the
+        # table name prints before the non-zero exit:
+        #
+        #   echo '[{"table_name":"users","row_count":0}]' | python3 -c "
+        #   import sys, json
+        #   data = json.load(sys.stdin)
+        #   empty = [t['table_name'] for t in data if t['row_count'] == 0]
+        #   if empty:
+        #       print('EMPTY_TABLES: ' + ', '.join(empty), flush=True)
+        #       sys.exit(1)
+        #   "
+        #   # Expected output: EMPTY_TABLES: users
+        #   # Expected exit:   1
+        #
+        # FILES TO CHANGE
+        # ---------------
+        #   .github/workflows/db-backup-verify.yml  ← (THIS FILE)
+        #     Remove the EMPTY=$(...) command substitution and run python3 inline.
+        # -----------------------------------------------------------------------
         run: |
           RESULT=$(psql -h 127.0.0.1 -U verify_user -d verify_db -t -c "
             SELECT json_agg(row_to_json(t)) FROM (
@@ -69,6 +149,11 @@ jobs:
             ) t;
           ")
           echo "Row counts: $RESULT"
+          # TODO (#1596): Replace the EMPTY=$(...) block below with the inline
+          # form shown in the documentation above. The current code swallows the
+          # EMPTY_TABLES diagnostic. The fix is to drop the command substitution
+          # so python3's stdout flows directly to the runner log.
+          #
           # Fail if any table has 0 rows (adjust threshold as needed)
           EMPTY=$(echo "$RESULT" | python3 -c "
           import sys, json

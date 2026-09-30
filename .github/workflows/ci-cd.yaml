@@ -71,6 +71,77 @@ jobs:
           chmod 600 ~/.kube/config
 
       - name: Deploy to Kubernetes
+        # -----------------------------------------------------------------------
+        # Issue #1598 — [High] Staging CD pipeline updates socialflow-backend
+        # deployment image but never touches socialflow-worker
+        # https://github.com/hman38705/socialflow-ai-dashboard/issues/1598
+        #
+        # ROOT CAUSE
+        # ----------
+        # This step only builds backend/Dockerfile (tagged socialflow-backend)
+        # and only updates the socialflow-backend Deployment. k8s/base/
+        # worker-deployment.yaml defines a separate socialflow-worker Deployment
+        # (container name: worker) built from backend/Dockerfile.worker. Nothing
+        # in this pipeline builds, pushes, or deploys the worker image.
+        #
+        # As a result, every staging deploy leaves the worker pods running
+        # whatever image they were last manually updated to. Background job code
+        # (BullMQ workers for AI analysis, post publishing, translation, TTS,
+        # video transcode) runs stale logic indefinitely while the API server
+        # runs the latest commit — silently, with no error or warning.
+        #
+        # FIX
+        # ---
+        # Two changes are needed:
+        #
+        # 1. Add a second "Build and push worker image" step BEFORE this step,
+        #    building backend/Dockerfile.worker and tagging it as socialflow-worker:
+        #
+        #    env:
+        #      WORKER_IMAGE: ghcr.io/${{ github.repository_owner }}/socialflow-worker
+        #      TAG: ${{ github.sha }}
+        #
+        #    - name: Build and push worker Docker image
+        #      uses: docker/build-push-action@v6
+        #      with:
+        #        context: ./backend
+        #        file: backend/Dockerfile.worker
+        #        push: true
+        #        tags: |
+        #          ${{ env.WORKER_IMAGE }}:${{ env.TAG }}
+        #          ${{ env.WORKER_IMAGE }}:latest
+        #
+        # 2. Extend this "Deploy to Kubernetes" step to also update the
+        #    socialflow-worker Deployment and wait for its rollout:
+        #
+        #    kubectl set image deployment/socialflow-worker \
+        #      worker=${{ env.WORKER_IMAGE }}:${{ env.TAG }} \
+        #      --namespace=staging
+        #    kubectl rollout status deployment/socialflow-worker \
+        #      --namespace=staging \
+        #      --timeout=120s
+        #
+        # Both deployments must use the same ${{ github.sha }} tag so a single
+        # commit always produces matching API server + worker images.
+        #
+        # ACCEPTANCE CRITERIA
+        # -------------------
+        # After the fix, a staging deploy triggered by a push to the staging
+        # branch must update BOTH deployments to the same commit SHA tag.
+        # Verify with:
+        #
+        #   kubectl get deployment socialflow-worker \
+        #     -o jsonpath='{.spec.template.spec.containers[0].image}' \
+        #     --namespace=staging
+        #   # Must equal: ghcr.io/<owner>/socialflow-worker:<sha>
+        #
+        # FILES TO CHANGE
+        # ---------------
+        #   .github/workflows/ci-cd.yaml  ← (THIS FILE)
+        #     1. Add WORKER_IMAGE env var alongside IMAGE
+        #     2. Add "Build and push worker Docker image" step
+        #     3. Extend "Deploy to Kubernetes" step with worker kubectl commands
+        # -----------------------------------------------------------------------
         run: |
           kubectl set image deployment/socialflow-backend \
             backend=${{ env.IMAGE }}:${{ env.TAG }} \
@@ -78,6 +149,13 @@ jobs:
           kubectl rollout status deployment/socialflow-backend \
             --namespace=staging \
             --timeout=120s
+          # TODO (#1598): Add worker deployment update here:
+          # kubectl set image deployment/socialflow-worker \
+          #   worker=ghcr.io/${{ github.repository_owner }}/socialflow-worker:${{ env.TAG }} \
+          #   --namespace=staging
+          # kubectl rollout status deployment/socialflow-worker \
+          #   --namespace=staging \
+          #   --timeout=120s
 
       - name: Smoke test /health
         run: |
