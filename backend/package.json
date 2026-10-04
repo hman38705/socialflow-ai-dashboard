@@ -98,7 +98,7 @@
     "@types/nock": "^10.0.3",
     "@types/node": "^20.12.7",
     "@types/redlock": "^4.0.8",
-    "@types/supertest": "^7.2.0",
+    "@types/supertest": "^7.2.1",
     "@types/swagger-jsdoc": "^6.0.4",
     "@types/swagger-ui-express": "^4.1.8",
     "@types/uuid": "^10.0.0",
@@ -110,7 +110,7 @@
     "jest": "^30.3.0",
     "nock": "^14.0.11",
     "prettier": "^3.9.6",
-    "supertest": "^7.2.2",
+    "supertest": "^7.3.0",
     "ts-jest": "^29.4.12",
     "ts-node-dev": "^2.0.0",
     "typescript": "^5.4.5"
