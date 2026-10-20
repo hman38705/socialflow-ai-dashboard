@@ -20,7 +20,13 @@ router.post('/sse-ticket', authenticate, (req: AuthRequest, res) => {
     return;
   }
 
-  const ticket = sseTicketService.generateTicket(userId);
+  let ticket: string;
+  try {
+    ticket = sseTicketService.generateTicket(userId);
+  } catch {
+    res.status(429).json({ message: 'Too many outstanding SSE tickets' });
+    return;
+  }
   res.status(200).json({ ticket, expiresIn: 30 });
 });
 

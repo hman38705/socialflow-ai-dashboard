@@ -1,5 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { authenticate as authMiddleware } from '../middleware/authenticate';
+import { auditAdmin } from '../middleware/auditAdmin';
 import { checkPermission } from '../middleware/checkPermission';
 import { circuitBreakerService } from '../services/CircuitBreakerService';
 import { aiService } from '../services/AIService';
@@ -80,7 +81,7 @@ router.get('/status/:service', (req: Request, res: Response) => {
  *         description: All circuit breakers reset
  */
 // Required permission: settings:manage
-router.post('/reset', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
+router.post('/reset', authMiddleware, checkPermission('settings:manage'), auditAdmin('admin:circuit-breaker:reset'), (req: Request, res: Response) => {
   try {
     circuitBreakerService.resetAll();
     res.json({
@@ -113,7 +114,7 @@ router.post('/reset', authMiddleware, checkPermission('settings:manage'), (req: 
  *         description: Circuit breaker opened
  */
 // Required permission: settings:manage
-router.post('/:service/open', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
+router.post('/:service/open', authMiddleware, checkPermission('settings:manage'), auditAdmin('admin:circuit-breaker:open'), (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     circuitBreakerService.open(service as any);
@@ -147,7 +148,7 @@ router.post('/:service/open', authMiddleware, checkPermission('settings:manage')
  *         description: Circuit breaker closed
  */
 // Required permission: settings:manage
-router.post('/:service/close', authMiddleware, checkPermission('settings:manage'), (req: Request, res: Response) => {
+router.post('/:service/close', authMiddleware, checkPermission('settings:manage'), auditAdmin('admin:circuit-breaker:close'), (req: Request, res: Response) => {
   try {
     const { service } = req.params;
     circuitBreakerService.close(service as any);
