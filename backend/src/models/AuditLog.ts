@@ -33,7 +33,17 @@ export type AuditAction =
   // Health
   | 'health:config:update'
   // Moderation
-  | 'moderation:config:fail-open';
+  | 'moderation:config:fail-open'
+  // Admin
+  | 'admin:cache:clear'
+  | 'admin:jobs:retry'
+  | 'admin:migrations:run'
+  | 'admin:migrations:rollback'
+  | 'admin:config:update'
+  | 'admin:config:refresh'
+  | 'admin:circuit-breaker:reset'
+  | 'admin:circuit-breaker:open'
+  | 'admin:circuit-breaker:close';
 
 export interface AuditLog {
   id: string;

@@ -1,6 +1,7 @@
 import { Router, Request, Response } from 'express';
 import { getDynamicConfigService, ConfigType, ConfigKey } from '../services/DynamicConfigService';
 import { authMiddleware } from '../middleware/authMiddleware';
+import { auditAdmin } from '../middleware/auditAdmin';
 import { checkPermission } from '../middleware/checkPermission';
 
 const router = Router();
@@ -57,7 +58,7 @@ router.get('/', authMiddleware, checkPermission('settings:manage'), async (req: 
  * @desc Manually refresh the configuration cache from the database
  * @access Private/Admin
  */
-router.post('/refresh', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
+router.post('/refresh', authMiddleware, checkPermission('settings:manage'), auditAdmin('admin:config:refresh'), async (req: Request, res: Response) => {
   try {
     const svc = await getDynamicConfigService();
     await svc.refreshCache();
@@ -72,7 +73,7 @@ router.post('/refresh', authMiddleware, checkPermission('settings:manage'), asyn
  * @desc Update or create a configuration value
  * @access Private/Admin
  */
-router.put('/:key', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
+router.put('/:key', authMiddleware, checkPermission('settings:manage'), auditAdmin('admin:config:update'), async (req: Request, res: Response) => {
   const { key } = req.params;
   const { value, type, description } = req.body;
 

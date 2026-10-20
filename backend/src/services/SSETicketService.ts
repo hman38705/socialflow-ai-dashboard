@@ -19,11 +19,13 @@ interface SSETicket {
 class SSETicketService {
   private tickets: Map<string, SSETicket> = new Map();
   private readonly TICKET_TTL_MS = 30_000; // 30 seconds
+  private readonly MAX_TICKETS_PER_USER = 5;
   private cleanupInterval: NodeJS.Timeout | null = null;
 
   constructor() {
     // Clean up expired tickets every 60 seconds
     this.cleanupInterval = setInterval(() => this.cleanup(), 60_000);
+    this.cleanupInterval.unref();
   }
 
   /**
@@ -33,6 +35,15 @@ class SSETicketService {
    * @returns A single-use ticket string (32 random bytes, hex-encoded)
    */
   generateTicket(userId: string): string {
+    const now = Date.now();
+    let outstanding = 0;
+    for (const entry of this.tickets.values()) {
+      if (entry.userId === userId && !entry.consumed && now <= entry.expiresAt) outstanding++;
+    }
+    if (outstanding >= this.MAX_TICKETS_PER_USER) {
+      throw new Error('Too many outstanding SSE tickets');
+    }
+
     const ticket = crypto.randomBytes(32).toString('hex');
     const expiresAt = Date.now() + this.TICKET_TTL_MS;
 
@@ -98,6 +109,13 @@ class SSETicketService {
     if (removed > 0) {
       logger.debug(`Cleaned up ${removed} expired/consumed SSE tickets`);
     }
+  }
+
+  /**
+   * Stop the cleanup timer and clear all tickets (tests/shutdown).
+   */
+  stop(): void {
+    this.shutdown();
   }
 
   /**
