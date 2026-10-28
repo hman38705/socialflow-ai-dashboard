@@ -71,11 +71,11 @@ const handler = (req: Request, res: Response): void => {
   const retryAfter = Math.ceil(Number(res.getHeader('Retry-After') ?? 60));
 
   logger.warn('rate_limit_exceeded', {
-    ip:        req.ip ?? (req.socket as { remoteAddress?: string })?.remoteAddress ?? 'unknown',
-    path:      req.path,
-    method:    req.method,
+    ip: req.ip ?? (req.socket as { remoteAddress?: string })?.remoteAddress ?? 'unknown',
+    path: req.path,
+    method: req.method,
     userAgent: req.headers['user-agent'] ?? '',
-    userId:    (req as Request & { user?: { id?: string } }).user?.id ?? null,
+    userId: (req as Request & { user?: { id?: string } }).user?.id ?? null,
     retryAfter,
   });
 
@@ -126,6 +126,17 @@ export let aiLimiter: RateLimitRequestHandler;
 export let generalLimiter: RateLimitRequestHandler;
 
 /**
+ * Per-user limiter for the AI image-analysis endpoint.
+ *
+ * Each call to /ai/analyze-image spends credits and triggers a paid Gemini
+ * request, so a tighter per-user limit (5 per minute) is applied on top of
+ * the global AI limiter (30 per minute, per IP). Keying on the authenticated
+ * user ID (falling back to IP when unauthenticated) prevents a single user
+ * from consuming the entire IP-shared budget.
+ */
+export let aiImageLimiter: RateLimitRequestHandler;
+
+/**
  * Verify the rate-limiter Redis store is reachable at startup.
  *
  * In production, a missing or unreachable Redis store means rate limits are
@@ -155,7 +166,7 @@ export async function checkRateLimiterStore(
  * Resolves the Redis store (if production) and wires up all limiters.
  */
 export async function initRateLimiters(): Promise<void> {
-  [authLimiter, aiLimiter, generalLimiter] = await Promise.all([
+  [authLimiter, aiLimiter, generalLimiter, aiImageLimiter] = await Promise.all([
     // Auth endpoints — strict: 10 attempts per 15 minutes
     createLimiter({
       windowMs: 15 * 60 * 1000,
@@ -174,6 +185,18 @@ export async function initRateLimiters(): Promise<void> {
     createLimiter({
       windowMs: 60 * 1000,
       max: 100,
+    }),
+
+    // Per-user AI image analysis — 5 per minute keyed on user ID
+    createLimiter({
+      windowMs: 60 * 1000,
+      max: 5,
+      keyGenerator: (req: Request): string => {
+        const user = (req as Request & { user?: { id?: string } }).user;
+        return user?.id ?? req.ip ?? req.socket.remoteAddress ?? 'unknown';
+      },
+      message:
+        'AI image analysis rate limit reached (5 per minute). Please wait before making more requests.',
     }),
   ]);
 }

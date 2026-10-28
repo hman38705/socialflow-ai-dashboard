@@ -1,45 +1,110 @@
 import crypto from 'crypto';
 import { isIP } from 'net';
 import dns from 'dns/promises';
+import https from 'https';
+import http from 'http';
 import { prisma } from '../lib/prisma';
 import { createLogger } from '../lib/logger';
 import { webhookDispatchFailed, webhookDispatchTotal } from '../lib/metrics';
 import { WebhookEventType } from '../schemas/webhooks';
 import { decryptWebhookSecret } from '../lib/webhookSecretCrypto';
+import ipaddr from 'ipaddr.js';
 
 const logger = createLogger('WebhookDispatcher');
 
-// RFC 1918 + loopback + link-local CIDRs blocked to prevent SSRF
-const BLOCKED_CIDRS: Array<{ base: number; mask: number }> = [
-  { base: ipToInt('10.0.0.0'), mask: 0xff000000 },
-  { base: ipToInt('172.16.0.0'), mask: 0xfff00000 },
-  { base: ipToInt('192.168.0.0'), mask: 0xffff0000 },
-  { base: ipToInt('127.0.0.0'), mask: 0xff000000 },
-  { base: ipToInt('169.254.0.0'), mask: 0xffff0000 },
-  { base: ipToInt('0.0.0.0'), mask: 0xff000000 },
-];
+// ---------------------------------------------------------------------------
+// SSRF protection — ipaddr.js-based range classification (#1776)
+// ---------------------------------------------------------------------------
 
-function ipToInt(ip: string): number {
-  return ip.split('.').reduce((acc, octet) => (acc << 8) | parseInt(octet, 10), 0) >>> 0;
+/**
+ * ipaddr.js `range()` return values that indicate the address is NOT safe
+ * for outbound webhook delivery. This covers:
+ *
+ *  IPv4: private, loopback, linkLocal, carrierGradeNat, reserved,
+ *        multicast, broadcast, unspecified
+ *  IPv6: loopback, uniqueLocal, linkLocal, ipv4Mapped, multicast,
+ *        reserved, unspecified
+ *
+ * The previous hand-rolled CIDR list only covered 10/8, 172.16/12,
+ * 192.168/16, 127/8, 169.254/16, 0/8 — omitting CGNAT (100.64/10),
+ * 192.0.0/24, 198.18/15, multicast (224/4), and ALL IPv6 space.
+ */
+const BLOCKED_RANGES = new Set([
+  // IPv4
+  'private',
+  'loopback',
+  'linkLocal',
+  'carrierGradeNat',
+  'reserved',
+  'multicast',
+  'broadcast',
+  'unspecified',
+  // IPv6
+  'uniqueLocal',
+  'ipv4Mapped',
+]);
+
+/**
+ * Classify a single IP address string as safe or blocked using ipaddr.js.
+ * Handles both IPv4 and IPv6, including IPv4-mapped IPv6 addresses (which
+ * are unwrapped to their IPv4 form before classification).
+ */
+function isBlockedIP(ip: string): boolean {
+  if (!ipaddr.isValid(ip)) return true; // treat unparseable as blocked (fail-closed)
+
+  let addr = ipaddr.parse(ip);
+
+  // IPv4-mapped IPv6 addresses (e.g. ::ffff:10.0.0.1) must be checked as IPv4
+  if (addr instanceof ipaddr.IPv6 && addr.isIPv4MappedAddress()) {
+    addr = addr.toIPv4Address();
+  }
+
+  return BLOCKED_RANGES.has(addr.range());
 }
 
-function isPrivateIPv4(ip: string): boolean {
-  if (isIP(ip) !== 4) return false;
-  const n = ipToInt(ip);
-  // `& ` on numbers >= 2^31 (e.g. 169.254.0.0 = 2851995648) produces a signed
-  // 32-bit result in JS, which would never === an unsigned `base` — force
-  // both sides back to unsigned before comparing.
-  return BLOCKED_CIDRS.some(({ base, mask }) => ((n & mask) >>> 0) === base);
+/**
+ * Resolve a hostname to all A and AAAA records, returning the combined
+ * list of IP addresses. Throws if resolution fails for both families.
+ */
+async function resolveAll(hostname: string): Promise<string[]> {
+  const addresses: string[] = [];
+
+  // Attempt IPv4 first (backward compat with existing callers), then IPv6
+  try {
+    const v4 = await dns.resolve4(hostname);
+    addresses.push(...v4);
+  } catch {
+    // IPv4 resolution failed — will try IPv6 below
+  }
+
+  try {
+    const v6 = await dns.resolve6(hostname);
+    addresses.push(...v6);
+  } catch {
+    // IPv6 resolution failed
+  }
+
+  if (addresses.length === 0) {
+    throw new Error(`Webhook URL hostname could not be resolved: ${hostname}`);
+  }
+
+  return addresses;
 }
 
 /**
  * Validate that a webhook URL is not HTTPS-to-a-blocked-address SSRF bait.
- * Resolves the hostname and rejects private/loopback/link-local addresses
- * (including the 169.254.169.254 cloud metadata endpoint). Exported so
- * callers can re-run the same check at webhook creation/update time, not
- * only immediately before each delivery — DNS can change between the two.
+ * Resolves the hostname (both A and AAAA) and rejects private/loopback/
+ * link-local/CGNAT/reserved/multicast addresses — including the
+ * 169.254.169.254 cloud metadata endpoint — for both IPv4 and IPv6.
+ *
+ * Returns the first validated IP address so callers can connect to it
+ * directly, preventing DNS rebinding (#1777).
+ *
+ * Exported so callers can re-run the same check at webhook creation/update
+ * time, not only immediately before each delivery — DNS can change between
+ * the two.
  */
-export async function assertSafeUrl(url: string): Promise<void> {
+export async function assertSafeUrl(url: string): Promise<string> {
   let parsed: URL;
   try {
     parsed = new URL(url);
@@ -51,27 +116,34 @@ export async function assertSafeUrl(url: string): Promise<void> {
     throw new Error(`Webhook URL must use https (got ${parsed.protocol}): ${url}`);
   }
 
-  const hostname = parsed.hostname;
+  // URL.hostname keeps the brackets around IPv6 literals; strip them so isIP/ipaddr can parse
+  const hostname = parsed.hostname.replace(/^\[|\]$/g, '');
 
-  if (isIP(hostname) === 4) {
-    if (isPrivateIPv4(hostname)) {
+  // Literal IP in URL — validate directly
+  if (isIP(hostname) !== 0) {
+    if (isBlockedIP(hostname)) {
       throw new Error(`Webhook URL resolves to a blocked address: ${url}`);
     }
-    return;
+    return hostname;
   }
 
-  let addresses: string[];
-  try {
-    addresses = await dns.resolve4(hostname);
-  } catch {
+  // Hostname — resolve and validate all addresses
+  const addresses = await resolveAll(hostname);
+
+  let validatedIP: string | undefined;
+  for (const addr of addresses) {
+    if (isBlockedIP(addr)) {
+      throw new Error(`Webhook URL resolves to a blocked address (${addr}): ${url}`);
+    }
+    // Use the first safe address for the connection
+    if (!validatedIP) validatedIP = addr;
+  }
+
+  if (!validatedIP) {
     throw new Error(`Webhook URL hostname could not be resolved: ${hostname}`);
   }
 
-  for (const addr of addresses) {
-    if (isPrivateIPv4(addr)) {
-      throw new Error(`Webhook URL resolves to a blocked address (${addr}): ${url}`);
-    }
-  }
+  return validatedIP;
 }
 
 const MAX_ATTEMPTS = 5;
@@ -96,6 +168,25 @@ export async function readBodyCapped(res: Response, maxBytes: number): Promise<s
   } finally {
     await reader.cancel().catch(() => undefined);
   }
+  return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
+}
+
+/**
+ * Read at most `maxBytes` from an IncomingMessage stream, then destroy it.
+ * Mirrors readBodyCapped but for the http.IncomingMessage used by safeFetch.
+ */
+export async function readBodyCappedFromStream(
+  stream: http.IncomingMessage,
+  maxBytes: number,
+): Promise<string> {
+  const chunks: Buffer[] = [];
+  let received = 0;
+  for await (const chunk of stream) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+    received += chunks[chunks.length - 1].byteLength;
+    if (received >= maxBytes) break;
+  }
+  stream.destroy();
   return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
 }
 const TIMEOUT_MS = 10_000; // 10 s per request
@@ -147,6 +238,134 @@ export async function resolveSigningSecret(
     return null;
   }
 }
+
+// ---------------------------------------------------------------------------
+// safeFetch — DNS-rebinding-safe HTTP client (#1775 + #1777)
+// ---------------------------------------------------------------------------
+
+/**
+ * Response shape returned by safeFetch. Mirrors a subset of the global
+ * fetch Response so readBodyCapped and existing call sites keep working.
+ */
+export interface SafeFetchResponse {
+  ok: boolean;
+  status: number;
+  body: ReadableStream<Uint8Array> | null;
+  text(): Promise<string>;
+}
+
+/**
+ * Make an HTTPS POST request that:
+ *  - Does NOT follow redirects (#1775 — redirect: 'manual' equivalent).
+ *    Any 3xx response is returned as-is so the caller can treat it as a
+ *    failed delivery.
+ *  - Connects to the pre-validated `ipAddress` instead of re-resolving the
+ *    hostname, preventing DNS rebinding (#1777). SNI and Host header are
+ *    preserved by setting `servername` and the `Host` header to the
+ *    original hostname.
+ *
+ * Returns a fetch-compatible response object (ok, status, body, text()).
+ */
+export function safeFetch(
+  url: string,
+  validatedIP: string,
+  options: {
+    method: string;
+    headers: Record<string, string>;
+    body: string;
+    signal: AbortSignal;
+  },
+): Promise<SafeFetchResponse> {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(url);
+    const hostname = parsed.hostname;
+    const port = parsed.port || (parsed.protocol === 'https:' ? '443' : '80');
+    const path = parsed.pathname + parsed.search;
+
+    // Build request headers, preserving the original Host header
+    const reqHeaders: Record<string, string> = { ...options.headers };
+    reqHeaders['Host'] = hostname;
+
+    // Create an agent with a custom lookup that always returns the validated
+    // IP — this prevents DNS rebinding because the connection target is
+    // pinned to the IP we validated, not re-resolved.
+    const agent = new https.Agent({
+      keepAlive: false,
+      // Custom DNS lookup — always resolve to the validated IP
+      lookup: (
+        _hostname: string,
+        _opts: dns.LookupOneOptions,
+        callback: (err: Error | null, address: string, family: number) => void,
+      ) => {
+        const family = isIP(validatedIP);
+        callback(null, validatedIP, family === 6 ? 6 : 4);
+      },
+    });
+
+    const req = https.request(
+      {
+        method: options.method,
+        hostname: hostname, // Connect using hostname for SNI
+        port: port,
+        path: path,
+        headers: reqHeaders,
+        agent: agent,
+        servername: hostname, // Preserve SNI for TLS certificate verification
+        // The custom agent lookup forces the TCP connection to validatedIP
+      },
+      (res: http.IncomingMessage) => {
+        // Convert IncomingMessage to a fetch-compatible response
+        const status = res.statusCode ?? 0;
+        const ok = status >= 200 && status < 300;
+
+        // Wrap the IncomingMessage stream as a ReadableStream for body
+        const body = res.readable
+          ? new ReadableStream<Uint8Array>({
+              start(controller) {
+                res.on('data', (chunk: Buffer) => {
+                  controller.enqueue(new Uint8Array(chunk));
+                });
+                res.on('end', () => controller.close());
+                res.on('error', (err) => controller.error(err));
+              },
+              cancel() {
+                res.destroy();
+              },
+            })
+          : null;
+
+        const text = async (): Promise<string> => {
+          const chunks: Buffer[] = [];
+          for await (const chunk of res) {
+            chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+          }
+          return Buffer.concat(chunks).toString('utf8');
+        };
+
+        resolve({ ok, status, body, text });
+      },
+    );
+
+    req.on('error', (err) => reject(err));
+
+    // Handle abort signal
+    if (options.signal.aborted) {
+      req.destroy();
+      reject(new Error('The operation was aborted'));
+      return;
+    }
+    options.signal.addEventListener('abort', () => {
+      req.destroy();
+      reject(new Error('The operation was aborted'));
+    });
+
+    req.write(options.body);
+    req.end();
+  });
+}
+
+/** Indirection so tests can stub the transport (internal calls bypass module-export spies). */
+export const deliveryTransport = { safeFetch };
 
 /**
  * Dispatch a webhook event to all active subscribers for that event type.
@@ -202,6 +421,12 @@ export async function dispatchEvent(
 
 /**
  * Attempt a single delivery. On failure, schedule a retry up to MAX_ATTEMPTS.
+ *
+ * Security measures:
+ *  - assertSafeUrl validates the URL and resolves the hostname once,
+ *    returning the validated IP (prevents DNS rebinding — #1777).
+ *  - safeFetch connects to the validated IP, preserving Host/SNI.
+ *  - Redirects are not followed (3xx treated as failure — #1775).
  */
 export async function attemptDelivery(
   deliveryId: string,
@@ -212,8 +437,9 @@ export async function attemptDelivery(
 ): Promise<void> {
   webhookDispatchTotal.inc();
 
+  let validatedIP: string;
   try {
-    await assertSafeUrl(url);
+    validatedIP = await assertSafeUrl(url);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     logger.error(`Delivery ${deliveryId} blocked — unsafe URL`, { url, errorMessage });
@@ -234,7 +460,7 @@ export async function attemptDelivery(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const res = await fetch(url, {
+    const res = await deliveryTransport.safeFetch(url, validatedIP, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -247,7 +473,7 @@ export async function attemptDelivery(
 
     clearTimeout(timer);
     responseStatus = res.status;
-    responseBody = await readBodyCapped(res, MAX_RESPONSE_BODY_BYTES); // cap stored body
+    responseBody = await readBodyCapped(res as unknown as Response, MAX_RESPONSE_BODY_BYTES); // cap stored body
 
     if (res.ok) {
       await prisma.webhookDelivery.update({

@@ -1,7 +1,10 @@
 import { Router, Request, Response } from 'express';
 import { analyzeImage, GeminiServiceError } from '../services/geminiService';
-import { authMiddleware } from '../middleware/authMiddleware';
+import { authenticate } from '../middleware/authenticate';
 import { checkPermission } from '../middleware/checkPermission';
+import { validate } from '../middleware/validate';
+import { aiImageLimiter } from '../middleware/rateLimit';
+import { analyzeImageSchema } from '../schemas/ai';
 
 const router = Router();
 
@@ -10,22 +13,20 @@ const router = Router();
  * Accepts an image (base64 buffer or URL) and returns an AI-generated social media caption.
  * Requires authentication. Credits are deducted post-call proportional to token usage.
  *
- * Body:
+ * Body (validated via analyzeImageSchema):
  *   imageData   {string}  Base64-encoded image data or a public image URL (required)
- *   mimeType    {string}  MIME type, e.g. "image/jpeg" (optional, default: "image/jpeg")
- *   context     {string}  Optional prompt context to guide caption style/topic
+ *   mimeType    {string}  MIME type — image/jpeg | image/png | image/gif | image/webp (default: image/jpeg)
+ *   context     {string}  Optional prompt context (max 500 chars) to guide caption style/topic
  */
 // Required permission: posts:create
 router.post(
   '/analyze-image',
-  authMiddleware,
+  authenticate,
+  aiImageLimiter,
   checkPermission('posts:create'),
+  validate(analyzeImageSchema),
   async (req: Request, res: Response) => {
     const { imageData, mimeType, context } = req.body;
-
-    if (!imageData) {
-      return res.status(400).json({ error: 'imageData is required.' });
-    }
 
     try {
       const caption = await analyzeImage(imageData, mimeType, context);

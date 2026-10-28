@@ -56,7 +56,7 @@ export class BillingService {
         requestBody,
     }: {
         requestBody: {
-            plan: 'starter' | 'pro' | 'enterprise';
+            priceId: string;
             successUrl: string;
             cancelUrl: string;
         },

@@ -2,7 +2,7 @@ import crypto from 'crypto';
 import { prisma } from '../../../lib/prisma';
 import { createLogger } from '../../../lib/logger';
 import { WebhookEventType } from '../../../schemas/webhooks';
-import { assertSafeUrl } from '../../../services/WebhookDispatcher';
+import { assertSafeUrl, safeFetch, readBodyCapped } from '../../../services/WebhookDispatcher';
 
 const logger = createLogger('WebhookDispatcher');
 
@@ -82,8 +82,9 @@ export async function attemptDelivery(
   payload: string,
   attempt: number,
 ): Promise<void> {
+  let validatedIP: string;
   try {
-    await assertSafeUrl(url);
+    validatedIP = await assertSafeUrl(url);
   } catch (err) {
     const errorMessage = err instanceof Error ? err.message : String(err);
     logger.error(`Delivery ${deliveryId} blocked — unsafe URL`, { url, errorMessage });
@@ -104,7 +105,7 @@ export async function attemptDelivery(
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
 
-    const res = await fetch(url, {
+    const res = await safeFetch(url, validatedIP, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -117,7 +118,7 @@ export async function attemptDelivery(
 
     clearTimeout(timer);
     responseStatus = res.status;
-    responseBody = (await res.text()).slice(0, 1000); // cap stored body
+    responseBody = await readBodyCapped(res as unknown as Response, 1000); // cap stored body
 
     if (res.ok) {
       await prisma.webhookDelivery.update({
