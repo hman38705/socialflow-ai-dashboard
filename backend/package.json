@@ -78,7 +78,7 @@
     "stripe": "^22.3.2",
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
-    "twilio": "^6.0.2",
+    "twilio": "^6.2.0",
     "uuid": "^14.0.0",
     "winston": "^3.19.0",
     "winston-elasticsearch": "^0.19.0",
