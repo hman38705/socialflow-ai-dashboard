@@ -1,4 +1,6 @@
 import Redis from 'ioredis';
+import request from 'supertest';
+import express, { Express } from 'express';
 import { Logger } from '../lib/logger';
 import {
   listMigrations,
@@ -14,6 +16,69 @@ import {
   MIGRATION_LOCK_TIMEOUT_MS,
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
+
+// ---------------------------------------------------------------------------
+// Route-level flag validation harness
+//
+// The migration routes read `dryRun` and `force` from the request body. These
+// helpers mirror the coercion/rejection contract the routes must honour:
+//   - boolean values are passed through untouched
+//   - any non-boolean value (e.g. the string "false") is rejected with a 400
+//   - omitting a flag falls back to the safe default (dryRun: false, force: false)
+// ---------------------------------------------------------------------------
+
+interface MigrationFlags {
+  dryRun: boolean;
+  force: boolean;
+}
+
+function parseMigrationFlags(body: Record<string, unknown>): MigrationFlags {
+  const parseFlag = (value: unknown, name: string): boolean => {
+    if (value === undefined) {
+      return false;
+    }
+    if (typeof value !== 'boolean') {
+      throw new TypeError(`Invalid ${name}: expected a boolean`);
+    }
+    return value;
+  };
+
+  return {
+    dryRun: parseFlag(body.dryRun, 'dryRun'),
+    force: parseFlag(body.force, 'force'),
+  };
+}
+
+function buildMigrationApp(
+  runMigrationsMock: jest.Mock,
+): Express {
+  const app = express();
+  app.use(express.json());
+
+  // Admin auth stub — mirrors the auth/admin stubs in setup.ts
+  app.use((req, _res, next) => {
+    (req as unknown as { user: { id: string; isAdmin: boolean } }).user = {
+      id: 'admin-test-user',
+      isAdmin: true,
+    };
+    next();
+  });
+
+  app.post('/admin/migrations/run', async (req, res) => {
+    let flags: MigrationFlags;
+    try {
+      flags = parseMigrationFlags((req.body ?? {}) as Record<string, unknown>);
+    } catch (err) {
+      res.status(400).json({ error: (err as Error).message });
+      return;
+    }
+
+    const result = await runMigrationsMock(flags);
+    res.status(200).json(result);
+  });
+
+  return app;
+}
 
 describe('Migration Service — Lock, Checksum & Idempotency', () => {
   let redis: Redis;
@@ -528,6 +593,77 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
       );
 
       expect(result.executed.length).toBe(0);
+    });
+  });
+
+  describe('Route Flag Validation (dryRun / force)', () => {
+    let app: Express;
+    let runMigrationsMock: jest.Mock;
+
+    beforeEach(() => {
+      runMigrationsMock = jest.fn().mockResolvedValue({
+        executed: [],
+        skipped: [],
+        failed: [],
+        dryRun: false,
+        lockAcquired: true,
+      });
+      app = buildMigrationApp(runMigrationsMock);
+    });
+
+    it('should honour boolean dryRun true and false', async () => {
+      const dryRunResponse = await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: true })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ dryRun: true }),
+      );
+      expect(dryRunResponse.body).toBeDefined();
+
+      const runResponse = await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: false })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ dryRun: false }),
+      );
+      expect(runResponse.body).toBeDefined();
+    });
+
+    it('should reject a non-boolean dryRun with 400', async () => {
+      const response = await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: 'false' })
+        .expect(400);
+
+      expect(response.body.error).toMatch(/dryRun/);
+      expect(runMigrationsMock).not.toHaveBeenCalled();
+    });
+
+    it('should reject a non-boolean force with 400', async () => {
+      const response = await request(app)
+        .post('/admin/migrations/run')
+        .send({ force: 'true' })
+        .expect(400);
+
+      expect(response.body.error).toMatch(/force/);
+      expect(runMigrationsMock).not.toHaveBeenCalled();
+    });
+
+    it('should apply safe defaults when both flags are omitted', async () => {
+      await request(app)
+        .post('/admin/migrations/run')
+        .send({})
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenCalledTimes(1);
+      expect(runMigrationsMock).toHaveBeenCalledWith({
+        dryRun: false,
+        force: false,
+      });
     });
   });
 

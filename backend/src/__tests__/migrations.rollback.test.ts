@@ -9,12 +9,21 @@ import {
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
 
+const mockAuditLog = jest.fn();
+
+jest.mock('../lib/auditLogger', () => ({
+  auditLogger: {
+    log: (...args: unknown[]) => mockAuditLog(...args),
+  },
+}));
+
 describe('Migration Rollback', () => {
   let redis: Redis;
   let mockLogger: Logger;
 
   beforeEach(() => {
     redis = new Redis(getRedisConnection());
+    mockAuditLog.mockReset();
     mockLogger = {
       info: jest.fn(),
       warn: jest.fn(),
@@ -99,6 +108,77 @@ describe('Migration Rollback', () => {
 
       statuses = await listMigrations();
       expect(statuses.find((s) => s.name === MIGRATION)?.applied).toBe(false);
+    });
+  });
+
+  describe('force guard audit entry', () => {
+    const MIGRATION = '20260324_sync_configured_queues';
+    const ACTOR = 'admin@example.com';
+
+    const findForceAuditCalls = () =>
+      mockAuditLog.mock.calls.filter(
+        ([entry]) =>
+          entry &&
+          typeof entry === 'object' &&
+          (entry as { action?: string }).action === 'migration.rollback.force',
+      );
+
+    it('writes an audit entry with expected action and actor on a forced rollback', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger, {
+        force: true,
+        actor: ACTOR,
+      });
+      expect(result.success).toBe(true);
+
+      const forceCalls = findForceAuditCalls();
+      expect(forceCalls).toHaveLength(1);
+
+      const [entry] = forceCalls[0];
+      expect(entry).toMatchObject({
+        action: 'migration.rollback.force',
+        actor: ACTOR,
+        target: MIGRATION,
+      });
+    });
+
+    it('does not write a force audit entry on a non-forced rollback', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+      expect(result.success).toBe(true);
+
+      expect(findForceAuditCalls()).toHaveLength(0);
+    });
+
+    it('redacts sensitive fields from the force audit payload', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger, {
+        force: true,
+        actor: ACTOR,
+        reason: 'manual recovery',
+        password: 'super-secret-password',
+        token: 'super-secret-token',
+      });
+      expect(result.success).toBe(true);
+
+      const forceCalls = findForceAuditCalls();
+      expect(forceCalls).toHaveLength(1);
+
+      const [entry] = forceCalls[0];
+      const serialized = JSON.stringify(entry);
+      expect(serialized).not.toContain('super-secret-password');
+      expect(serialized).not.toContain('super-secret-token');
+      expect(entry).not.toHaveProperty('password');
+      expect(entry).not.toHaveProperty('token');
+      expect(entry).toMatchObject({
+        action: 'migration.rollback.force',
+        actor: ACTOR,
+        target: MIGRATION,
+      });
     });
   });
 

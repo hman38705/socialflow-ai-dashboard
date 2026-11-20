@@ -1,6 +1,7 @@
 import { Logger } from '../lib/logger';
 import { getDiscoveredQueueNames, retryFailedJobs } from '../admin/jobAdminService';
 import { getConfiguredQueueNames } from '../config/runtime';
+import { MIN_BATCH_SIZE, MAX_BATCH_SIZE } from '../admin/constants';
 import { Queue } from 'bullmq';
 
 jest.mock('../config/runtime', () => ({
@@ -87,5 +88,41 @@ describe('jobAdminService', () => {
     expect(result.targetedJobs).toBe(2);
     expect(failedJobs[0].retry).not.toHaveBeenCalled();
     expect(closeMock).toHaveBeenCalled();
+  });
+
+  it('should accept the minimum batchSize', async () => {
+    const getFailedMock = jest.fn().mockResolvedValue([]);
+    const closeMock = jest.fn().mockResolvedValue(undefined);
+    QueueMock.mockImplementation(() => ({
+      getFailed: getFailedMock,
+      close: closeMock,
+    }));
+
+    const result = await retryFailedJobs(
+      { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: MIN_BATCH_SIZE },
+      mockLogger,
+    );
+
+    expect(getFailedMock).toHaveBeenCalled();
+    expect(result.dryRun).toBe(true);
+    expect(closeMock).toHaveBeenCalled();
+  });
+
+  it('should reject a batchSize one below the minimum', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: MIN_BATCH_SIZE - 1 },
+        mockLogger,
+      ),
+    ).rejects.toThrow(/batchSize/i);
+  });
+
+  it('should reject a batchSize above the maximum', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: MAX_BATCH_SIZE + 1 },
+        mockLogger,
+      ),
+    ).rejects.toThrow(/batchSize/i);
   });
 });
