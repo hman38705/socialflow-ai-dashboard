@@ -7,3 +7,7 @@ export const ADMIN_MIGRATIONS_METADATA_KEY = 'socialflow:admin:migrations:metada
 export const MIGRATION_LOCK_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 export const MIGRATION_LOCK_RETRY_INTERVAL_MS = 100;
 export const MIGRATION_LOCK_MAX_RETRIES = 300; // 30 seconds total with 100ms intervals
+
+// Bounds for admin numeric query/body parameters (limit, batchSize)
+export const ADMIN_NUMERIC_MIN = 1;
+export const ADMIN_NUMERIC_MAX = 1000;

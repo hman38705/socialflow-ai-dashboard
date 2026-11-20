@@ -1,6 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
+import { adminNumericSchema } from '../admin/schemas';
+import { ADMIN_NUMERIC_MAX, ADMIN_NUMERIC_MIN } from '../admin/constants';
 
 function makeReq(body?: unknown, query?: unknown, params?: unknown): Request {
   return {
@@ -184,5 +186,33 @@ describe('validate middleware', () => {
 
       expect(next).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+describe('adminNumericSchema (shared admin numeric schema)', () => {
+  const valid: Array<[string, unknown, number]> = [
+    ['numeric string is coerced', '100', 100],
+    ['number input', 50, 50],
+    ['lower bound', ADMIN_NUMERIC_MIN, ADMIN_NUMERIC_MIN],
+    ['upper bound', ADMIN_NUMERIC_MAX, ADMIN_NUMERIC_MAX],
+  ];
+  it.each(valid)('adminNumericSchema accepts %s', (_name, input, expected) => {
+    const result = adminNumericSchema.safeParse(input);
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data).toBe(expected);
+  });
+
+  const invalid: Array<[string, unknown]> = [
+    ['non-numeric string', 'abc'],
+    ['empty-ish non-numeric string', 'NaN'],
+    ['negative value', -1],
+    ['negative numeric string', '-5'],
+    ['zero (below lower bound)', ADMIN_NUMERIC_MIN - 1],
+    ['value above upper bound', ADMIN_NUMERIC_MAX + 1],
+    ['numeric string above upper bound', String(ADMIN_NUMERIC_MAX + 1)],
+    ['non-integer', 1.5],
+  ];
+  it.each(invalid)('adminNumericSchema rejects %s', (_name, input) => {
+    expect(adminNumericSchema.safeParse(input).success).toBe(false);
   });
 });
