@@ -147,7 +147,22 @@ export async function assertSafeUrl(url: string): Promise<string> {
 }
 
 const MAX_ATTEMPTS = 5;
-const MAX_RESPONSE_BODY_BYTES = 1000;
+export const MAX_RESPONSE_BODY_BYTES = 1000;
+
+/**
+ * Decode at most `maxBytes` of `buf` as UTF-8 without leaving a partial
+ * multibyte sequence (which would decode to U+FFFD) at the cut point.
+ */
+function decodeCapped(buf: Buffer, maxBytes: number): string {
+  let end = Math.min(buf.length, maxBytes);
+  if (end < buf.length) {
+    // Back up over continuation bytes (10xxxxxx) to the start of the char.
+    let start = end;
+    while (start > 0 && (buf[start] & 0xc0) === 0x80) start--;
+    end = start;
+  }
+  return buf.subarray(0, end).toString('utf8');
+}
 
 /**
  * Read at most `maxBytes` of a response body, then cancel the stream so a
@@ -168,7 +183,7 @@ export async function readBodyCapped(res: Response, maxBytes: number): Promise<s
   } finally {
     await reader.cancel().catch(() => undefined);
   }
-  return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
+  return decodeCapped(Buffer.concat(chunks), maxBytes);
 }
 
 /**
@@ -187,7 +202,7 @@ export async function readBodyCappedFromStream(
     if (received >= maxBytes) break;
   }
   stream.destroy();
-  return Buffer.concat(chunks).subarray(0, maxBytes).toString('utf8');
+  return decodeCapped(Buffer.concat(chunks), maxBytes);
 }
 const TIMEOUT_MS = 10_000; // 10 s per request
 // Exponential back-off delays in ms: 1 min, 5 min, 30 min, 2 h, 8 h

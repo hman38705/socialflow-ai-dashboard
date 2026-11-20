@@ -39,6 +39,7 @@ jest.mock('../services/WebhookDispatcher', () => ({
   assertSafeUrl: mockAssertSafeUrl,
 }));
 
+jest.mock('../lib/metrics', () => ({ webhookDispatchFailed: {}, webhookDispatchTotal: {} }));
 jest.mock('../middleware/authenticate', () => ({
   authenticate: (_req: Request, _res: Response, next: NextFunction) => next(),
 }));
@@ -427,5 +428,37 @@ describe('Inbound webhook — idempotency', () => {
     const res = await makeSignedRequest(handlerApp, { event: 'post.published' }, SECRET);
     expect(res.status).toBe(500);
     expect(res.body.message).toBe('dispatch failed');
+  });
+});
+
+// ── Stored response body truncation ───────────────────────────────────────────
+describe('Webhook delivery response body truncation', () => {
+  const { readBodyCapped, MAX_RESPONSE_BODY_BYTES } = jest.requireActual(
+    '../services/WebhookDispatcher',
+  ) as typeof import('../services/WebhookDispatcher');
+
+  const toResponse = (text: string) => new Response(text);
+
+  it('truncates a body over the limit to the byte cap', async () => {
+    const body = await readBodyCapped(
+      toResponse('a'.repeat(MAX_RESPONSE_BODY_BYTES * 3)),
+      MAX_RESPONSE_BODY_BYTES,
+    );
+    expect(Buffer.byteLength(body)).toBe(MAX_RESPONSE_BODY_BYTES);
+  });
+
+  it('does not split a multibyte character at the byte boundary', async () => {
+    // 3-byte chars: the limit falls mid-character when not divisible by 3.
+    const input = '€'.repeat(MAX_RESPONSE_BODY_BYTES);
+    const body = await readBodyCapped(toResponse(input), MAX_RESPONSE_BODY_BYTES);
+    expect(body).not.toContain('�');
+    expect(Buffer.byteLength(body)).toBeLessThanOrEqual(MAX_RESPONSE_BODY_BYTES);
+    expect(input.startsWith(body)).toBe(true);
+  });
+
+  it('stores a body under the limit unchanged', async () => {
+    const input = 'ok ✓ {"status":"received"}';
+    expect(Buffer.byteLength(input)).toBeLessThan(MAX_RESPONSE_BODY_BYTES);
+    expect(await readBodyCapped(toResponse(input), MAX_RESPONSE_BODY_BYTES)).toBe(input);
   });
 });
