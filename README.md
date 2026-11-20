@@ -545,3 +545,6 @@ curl -v http://localhost:3001/health
 
 <!-- handsoff-issue-1620 -->
 - #1620: [Bug] backend/src/scripts/data-pruning.ts CLI entrypoint has zero test coverage
+
+<!-- handsoff-issue-2083 -->
+- #2083: Add a test for the admin force flag guard on migration run
