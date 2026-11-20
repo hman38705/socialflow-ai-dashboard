@@ -3,6 +3,7 @@ import { authenticate } from '../middleware/authenticate';
 import { checkPermission } from '../middleware/checkPermission';
 import { createLogger } from '../lib/logger';
 import { getDiscoveredQueueNames, retryFailedJobs } from '../admin/jobAdminService';
+import { ADMIN_DEFAULT_LIMIT } from '../admin/constants';
 import { clearCache } from '../admin/cacheAdminService';
 import { listMigrations, runMigrations, rollbackMigration } from '../admin/migrationService';
 
@@ -25,7 +26,7 @@ router.get('/jobs/queues', async (_req, res) => {
 
 router.post('/jobs/retry', async (req, res) => {
   try {
-    const { queueName, limit = 100, dryRun = false, jobId } = req.body;
+    const { queueName, limit = ADMIN_DEFAULT_LIMIT, dryRun = false, jobId } = req.body;
     if (!queueName) {
       return res.status(400).json({ error: 'queueName is required' });
     }

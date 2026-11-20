@@ -28,6 +28,8 @@ jest.mock('../admin/migrationService', () => ({
 
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { ADMIN_DEFAULT_LIMIT } from '../admin/constants';
+import { retryFailedJobs } from '../admin/jobAdminService';
 
 const app = express();
 app.use(express.json());
@@ -99,5 +101,32 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin routes limit parameter', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (retryFailedJobs as jest.Mock).mockClear();
+  });
+
+  it('applies the shared default limit when limit is omitted', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ queueName: 'q' });
+    expect(res.status).toBe(200);
+    expect(retryFailedJobs).toHaveBeenCalledTimes(1);
+    expect((retryFailedJobs as jest.Mock).mock.calls[0][0].limit).toBe(ADMIN_DEFAULT_LIMIT);
+  });
+
+  it('lets an explicit limit override the default', async () => {
+    const explicit = ADMIN_DEFAULT_LIMIT + 1;
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ queueName: 'q', limit: explicit });
+    expect(res.status).toBe(200);
+    expect((retryFailedJobs as jest.Mock).mock.calls[0][0].limit).toBe(explicit);
   });
 });
