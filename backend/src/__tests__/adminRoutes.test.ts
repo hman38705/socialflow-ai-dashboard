@@ -26,8 +26,15 @@ jest.mock('../admin/migrationService', () => ({
   rollbackMigration: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+// Mock the audit logger consistently with audit.test.ts so we can assert
+// that config mutations are recorded in the audit trail.
+jest.mock('../services/auditLogService', () => ({
+  logAuditEvent: jest.fn().mockResolvedValue(undefined),
+}));
+
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { logAuditEvent } from '../services/auditLogService';
 
 const app = express();
 app.use(express.json());
@@ -99,5 +106,31 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin config audit logging', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (logAuditEvent as jest.Mock).mockClear();
+  });
+
+  it('writes an audit log entry capturing the changed key and acting admin on config PUT', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeLessThan(400);
+    expect(logAuditEvent).toHaveBeenCalledTimes(1);
+
+    const entry = (logAuditEvent as jest.Mock).mock.calls[0][0];
+    expect(entry).toEqual(
+      expect.objectContaining({
+        actorId: 'admin-user',
+        action: expect.stringMatching(/config/i),
+      }),
+    );
+    expect(JSON.stringify(entry)).toContain('featureFlags.newDashboard');
   });
 });

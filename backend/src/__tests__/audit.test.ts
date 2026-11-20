@@ -252,4 +252,44 @@ describe('audit middleware', () => {
       expect(logged.metadata.orgId).toBe('org-merge');
     });
   });
+
+  describe('admin config change audit', () => {
+    it('writes an audit entry capturing the changed key and acting admin on config PUT', () => {
+      const mw = audit(
+        'admin:config:update',
+        'config',
+        undefined,
+        () => ({ key: 'maxUploadSize' }),
+      );
+      const req = makeReq({ user: { id: 'admin-42' } });
+      const res = makeRes(200);
+
+      mw(req, res as Response, jest.fn() as NextFunction);
+      res.emit('finish');
+
+      expect(mockLog).toHaveBeenCalledTimes(1);
+      expect(mockLog.mock.calls[0][0]).toMatchObject({
+        actorId: 'admin-42',
+        action: 'admin:config:update',
+        resourceType: 'config',
+        metadata: { key: 'maxUploadSize' },
+      });
+    });
+
+    it('does not write an audit entry when the config PUT fails', () => {
+      const mw = audit(
+        'admin:config:update',
+        'config',
+        undefined,
+        () => ({ key: 'maxUploadSize' }),
+      );
+      const req = makeReq({ user: { id: 'admin-42' } });
+      const res = makeRes(400);
+
+      mw(req, res as Response, jest.fn() as NextFunction);
+      res.emit('finish');
+
+      expect(mockLog).not.toHaveBeenCalled();
+    });
+  });
 });
