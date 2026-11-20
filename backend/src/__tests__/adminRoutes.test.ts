@@ -35,6 +35,8 @@ jest.mock('../services/auditLogService', () => ({
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
 import { logAuditEvent } from '../services/auditLogService';
+import { retryFailedJobs } from '../admin/jobAdminService';
+import { MAX_BATCH_SIZE } from '../admin/constants';
 
 const app = express();
 app.use(express.json());
@@ -132,5 +134,59 @@ describe('Admin config audit logging', () => {
       }),
     );
     expect(JSON.stringify(entry)).toContain('featureFlags.newDashboard');
+  });
+});
+
+describe('Admin numeric input validation', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (retryFailedJobs as jest.Mock).mockClear();
+  });
+
+  it('rejects a non-numeric limit with a 400', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues')
+      .query({ limit: 'not-a-number' })
+      .set('x-test-user-id', 'admin-user');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+  });
+
+  it('rejects a non-numeric batchSize with a 400', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: 'not-a-number' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+    expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('enforces the upper bound on batchSize', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: MAX_BATCH_SIZE + 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+    expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('applies the default limit when omitted', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues')
+      .set('x-test-user-id', 'admin-user');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toBeDefined();
   });
 });
