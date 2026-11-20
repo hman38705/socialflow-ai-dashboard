@@ -142,6 +142,25 @@ describe('clearCache — key-pattern invalidation', () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
+  it('rejects a pattern outside the allowlist without deleting keys', async () => {
+    await expect(
+      clearCache({ pattern: 'tenant:*:secret', batchSize: 100 }, mockLogger),
+    ).rejects.toThrow(Error);
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it('allows a permitted pattern to reach the delete path', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['feed:1', 'feed:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    const result = await clearCache({ pattern: 'feed:*', batchSize: 100 }, mockLogger);
+
+    expect(result.deletedKeys).toBe(2);
+    expect(mockUnlink).toHaveBeenCalledWith('feed:1', 'feed:2');
+  });
+
 });
 
 // ---------------------------------------------------------------------------

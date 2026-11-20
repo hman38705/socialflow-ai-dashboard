@@ -64,6 +64,39 @@ describe('jobAdminService', () => {
     expect(closeMock).toHaveBeenCalled();
   });
 
+  it('should reject a retry request with a missing job id before touching the queue', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: undefined },
+        mockLogger,
+      ),
+    ).rejects.toThrow();
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject a retry request with an empty job id before touching the queue', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: '' },
+        mockLogger,
+      ),
+    ).rejects.toThrow();
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject a retry request with a non-string job id before touching the queue', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 123 as any },
+        mockLogger,
+      ),
+    ).rejects.toThrow(TypeError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
   it('should return dry-run results without retrying jobs', async () => {
     const failedJobs = [
       { id: 'job-1', failedReason: 'failed', retry: jest.fn() },

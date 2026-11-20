@@ -26,8 +26,19 @@ jest.mock('../admin/migrationService', () => ({
   rollbackMigration: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+// Mock the audit logger so we can assert audit entries without real storage.
+jest.mock('../services/AuditLogger', () => ({
+  auditLogger: {
+    log: jest.fn().mockResolvedValue(undefined),
+  },
+}));
+
 import { RoleStore } from '../models/Role';
+import { auditLogger } from '../services/AuditLogger';
 import adminRouter from '../routes/admin';
+
+const auditLogMock = auditLogger.log as jest.Mock;
+=======
 
 const app = express();
 app.use(express.json());
@@ -99,5 +110,40 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin config PUT audit logging', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    RoleStore.assign('editor-user', 'editor');
+    auditLogMock.mockClear();
+  });
+
+  it('writes an audit entry recording changed keys and acting admin on successful config PUT', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ featureFlags: { newDashboard: true } });
+
+    expect(res.status).toBe(200);
+    expect(auditLogMock).toHaveBeenCalledTimes(1);
+
+    const entry = auditLogMock.mock.calls[0][0];
+    expect(entry).toBeDefined();
+    expect(entry.actorId).toBe('admin-user');
+    expect(entry.changedKeys).toEqual(
+      expect.arrayContaining(['featureFlags']),
+    );
+  });
+
+  it('does not write an audit entry when the config PUT is rejected by validation', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ featureFlags: 'not-an-object' });
+
+    expect(res.status).toBe(400);
+    expect(auditLogMock).not.toHaveBeenCalled();
   });
 });
