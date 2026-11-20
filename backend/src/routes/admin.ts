@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { authenticate } from '../middleware/authenticate';
 import { checkPermission } from '../middleware/checkPermission';
+import { audit } from '../middleware/audit';
 import { createLogger } from '../lib/logger';
 import { getDiscoveredQueueNames, retryFailedJobs } from '../admin/jobAdminService';
 import { clearCache } from '../admin/cacheAdminService';
@@ -41,26 +42,36 @@ router.post('/jobs/retry', async (req, res) => {
 const CACHE_PREFIX = 'cache:';
 const RESERVED_PREFIXES = ['bull:', 'lock:', 'jwt:', 'oauth:'];
 
-router.post('/cache/clear', async (req, res) => {
-  try {
-    const { pattern, batchSize = 100, dryRun = false } = req.body;
-    if (!pattern) {
-      return res.status(400).json({ error: 'pattern is required' });
+router.post(
+  '/cache/clear',
+  audit('cache:clear', 'cache', undefined, (req) => ({
+    pattern: req.body?.pattern,
+    dryRun: Boolean(req.body?.dryRun),
+  })),
+  async (req, res) => {
+    try {
+      const { pattern, batchSize = 100, dryRun = false } = req.body;
+      if (!pattern) {
+        return res.status(400).json({ error: 'pattern is required' });
+      }
+      if (typeof pattern !== 'string') {
+        return res.status(400).json({ error: 'pattern must be a string' });
+      }
+      const scoped = pattern.startsWith(CACHE_PREFIX) ? pattern : `${CACHE_PREFIX}${pattern}`;
+      const suffix = scoped.slice(CACHE_PREFIX.length);
+      if (
+        !suffix.replace(/[*?[\]^-]/g, '') ||
+        RESERVED_PREFIXES.some((p) => suffix.startsWith(p))
+      ) {
+        return res.status(400).json({ error: 'pattern is too broad or targets a reserved prefix' });
+      }
+      const result = await clearCache({ pattern: scoped, batchSize, dryRun }, logger);
+      res.json(result);
+    } catch (error) {
+      res.status(500).json({ error: 'Failed to clear cache' });
     }
-    if (typeof pattern !== 'string') {
-      return res.status(400).json({ error: 'pattern must be a string' });
-    }
-    const scoped = pattern.startsWith(CACHE_PREFIX) ? pattern : `${CACHE_PREFIX}${pattern}`;
-    const suffix = scoped.slice(CACHE_PREFIX.length);
-    if (!suffix.replace(/[*?[\]^-]/g, '') || RESERVED_PREFIXES.some((p) => suffix.startsWith(p))) {
-      return res.status(400).json({ error: 'pattern is too broad or targets a reserved prefix' });
-    }
-    const result = await clearCache({ pattern: scoped, batchSize, dryRun }, logger);
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to clear cache' });
-  }
-});
+  },
+);
 
 // ── Migration Administration ──────────────────────────────────────────────────
 

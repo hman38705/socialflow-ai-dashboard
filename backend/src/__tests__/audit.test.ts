@@ -1,11 +1,41 @@
-import { Response, NextFunction } from 'express';
+import express, { Response, NextFunction } from 'express';
+import request from 'supertest';
 import { audit } from '../middleware/audit';
 import { AuthRequest } from '../middleware/authMiddleware';
+import adminRouter from '../routes/admin';
 
 const mockLog = jest.fn();
 
+jest.mock('../middleware/authenticate', () => ({
+  authenticate: (req: any, _res: any, next: any) => {
+    req.user = { id: req.headers['x-test-user-id'] || 'anon' };
+    next();
+  },
+}));
+// RBAC is covered in adminRoutes.test.ts; here we only exercise the audit surface
+jest.mock('../middleware/checkPermission', () => ({
+  checkPermission: () => (_req: any, _res: any, next: any) => next(),
+}));
+jest.mock('../admin/cacheAdminService', () => ({
+  clearCache: jest.fn().mockResolvedValue({
+    pattern: 'cache:feed:*',
+    matchedKeys: 2,
+    deletedKeys: 2,
+    dryRun: false,
+  }),
+}));
+jest.mock('../admin/jobAdminService', () => ({
+  getDiscoveredQueueNames: jest.fn(),
+  retryFailedJobs: jest.fn(),
+}));
+jest.mock('../admin/migrationService', () => ({
+  listMigrations: jest.fn(),
+  runMigrations: jest.fn(),
+  rollbackMigration: jest.fn(),
+}));
+
 jest.mock('../services/AuditLogger', () => ({
-  auditLogger: { log: mockLog },
+  auditLogger: { log: (...args: unknown[]) => mockLog(...args) },
 }));
 
 function makeReq(overrides: Partial<AuthRequest> = {}): AuthRequest {
@@ -251,5 +281,41 @@ describe('audit middleware', () => {
       expect(logged.metadata.extra).toBe('data');
       expect(logged.metadata.orgId).toBe('org-merge');
     });
+  });
+});
+
+describe('admin cache clear audit entry', () => {
+  const app = express();
+  app.use(express.json());
+  app.use('/admin', adminRouter);
+
+  it('writes an audit entry recording the actor and cleared pattern on success', async () => {
+    const res = await request(app)
+      .post('/admin/cache/clear')
+      .set('x-test-user-id', 'admin-user')
+      .send({ pattern: 'feed:*' });
+
+    expect(res.status).toBe(200);
+    expect(mockLog).toHaveBeenCalledTimes(1);
+    const entry = mockLog.mock.calls[0][0];
+    expect(entry.actorId).toBe('admin-user');
+    expect(entry.action).toBe('cache:clear');
+    expect(entry.resourceType).toBe('cache');
+    expect(entry.metadata.pattern).toBe('feed:*');
+  });
+
+  it('writes no audit entry when the request is rejected by validation', async () => {
+    const missing = await request(app)
+      .post('/admin/cache/clear')
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+    const wrongType = await request(app)
+      .post('/admin/cache/clear')
+      .set('x-test-user-id', 'admin-user')
+      .send({ pattern: 123 });
+
+    expect(missing.status).toBe(400);
+    expect(wrongType.status).toBe(400);
+    expect(mockLog).not.toHaveBeenCalled();
   });
 });

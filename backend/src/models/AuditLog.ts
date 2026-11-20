@@ -33,7 +33,9 @@ export type AuditAction =
   // Health
   | 'health:config:update'
   // Moderation
-  | 'moderation:config:fail-open';
+  | 'moderation:config:fail-open'
+  // Admin
+  | 'cache:clear';
 
 export interface AuditLog {
   id: string;
