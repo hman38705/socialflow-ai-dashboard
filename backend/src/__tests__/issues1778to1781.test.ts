@@ -49,3 +49,27 @@ describe('#1779 config', () => {
     ).toThrow();
   });
 });
+
+describe('#2046 SSE ticket sweep interval teardown', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('clears the sweep interval on teardown and leaves no active timers', () => {
+    jest.useFakeTimers();
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+
+    const { sseTicketService } = require('../services/SSETicketService');
+    sseTicketService.startSweep();
+    expect(setIntervalSpy).toHaveBeenCalled();
+    const sweepHandle = setIntervalSpy.mock.results[setIntervalSpy.mock.results.length - 1].value;
+    expect(jest.getTimerCount()).toBeGreaterThan(0);
+
+    sseTicketService.stopSweep();
+
+    expect(clearIntervalSpy).toHaveBeenCalledWith(sweepHandle);
+    expect(jest.getTimerCount()).toBe(0);
+  });
+});

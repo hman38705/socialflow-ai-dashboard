@@ -28,6 +28,7 @@ jest.mock('../admin/migrationService', () => ({
 
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { ErrorCodes } from '../constants/ErrorCodes';
 
 const app = express();
 app.use(express.json());
@@ -99,5 +100,35 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin routes limit validation', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+  });
+
+  it.each([
+    { label: 'non-numeric string', limit: 'abc' },
+    { label: 'negative number', limit: -1 },
+    { label: 'value above maximum', limit: 1000000 },
+  ])(
+    'rejects $label limit on POST /admin/jobs/retry',
+    async ({ limit }) => {
+      const res = await request(app)
+        .post('/admin/jobs/retry')
+        .set('x-test-user-id', 'admin-user')
+        .send({ limit });
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+    },
+  );
+
+  it('accepts a valid limit on POST /admin/jobs/retry', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ limit: 10 });
+    expect(res.status).toBe(200);
   });
 });
