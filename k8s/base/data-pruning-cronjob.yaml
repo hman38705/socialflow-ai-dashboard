@@ -1,3 +1,13 @@
+# Data pruning CronJob
+#
+# Purpose: applies the data retention policy by pruning (archiving or deleting)
+# aged log and analytics files from the shared data volume.
+# Schedule: daily at 03:00 UTC (see spec.schedule below).
+#
+# Retention settings (DATA_RETENTION_*) are read from the socialflow-config
+# ConfigMap / socialflow-secrets Secret via envFrom. The authoritative
+# description of the policy lives in backend/docs/retention-pruning-policy.md;
+# see also the DATA_RETENTION_* rows in the README.md variable table.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -50,6 +60,27 @@ spec:
               env:
                 - name: NODE_ENV
                   value: production
+                # Missing-path handling (optional; see README.md variable table and
+                # backend/docs/retention-pruning-policy.md for details):
+                #
+                # DATA_RETENTION_MISSING_PATH_POLICY: what the job does when a
+                # configured retention path does not exist.
+                #   warn   - log a warning and continue (default)
+                #   fail   - treat it as an error and fail the run
+                #   ignore - skip silently
+                # Take care before shipping `fail` to production: a single absent
+                # path will fail the whole job.
+                #
+                # DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD: fire an alert when
+                # the number of missing paths in a single run reaches this value
+                # (default 3).
+                #
+                # Both are normally inherited from socialflow-config; uncomment to
+                # override for this job only.
+                # - name: DATA_RETENTION_MISSING_PATH_POLICY
+                #   value: "warn"
+                # - name: DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
+                #   value: "3"
               securityContext:
                 allowPrivilegeEscalation: false
                 readOnlyRootFilesystem: true
