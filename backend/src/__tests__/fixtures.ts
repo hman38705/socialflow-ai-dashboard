@@ -78,3 +78,23 @@ export function hasLoneSurrogate(value: string): boolean {
   }
   return false;
 }
+
+/**
+ * Build a webhook delivery record suitable for exercising the retry job.
+ *
+ * @param overrides  Partial delivery fields to override the defaults
+ */
+export function createWebhookDelivery(
+  overrides: Record<string, unknown> = {},
+): Record<string, unknown> {
+  return {
+    id: `delivery-fixture-${Math.random().toString(36).slice(2, 8)}`,
+    webhookId: 'webhook-fixture',
+    event: 'test.event',
+    payload: { hello: 'world' },
+    status: 'pending',
+    attempts: 0,
+    lastError: null,
+    ...overrides,
+  };
+}
