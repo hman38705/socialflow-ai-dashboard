@@ -18,6 +18,14 @@ jest.mock('bullmq', () => ({
   Queue: jest.fn(),
 }));
 
+const mockAuditLog = jest.fn();
+
+jest.mock('../lib/auditLogger', () => ({
+  auditLogger: {
+    log: (...args: unknown[]) => mockAuditLog(...args),
+  },
+}));
+
 describe('jobAdminService', () => {
   const mockLogger = {
     info: jest.fn(),
@@ -62,6 +70,30 @@ describe('jobAdminService', () => {
     expect(result.retriedJobs).toBe(1);
     expect(result.dryRun).toBe(false);
     expect(closeMock).toHaveBeenCalled();
+  });
+
+  it('should write an audit log entry when an admin retries a job', async () => {
+    const retryMock = jest.fn().mockResolvedValue(undefined);
+    const getJobMock = jest.fn().mockResolvedValue({ failedReason: 'failed', retry: retryMock, id: 'job-1' });
+    const closeMock = jest.fn().mockResolvedValue(undefined);
+    QueueMock.mockImplementation(() => ({
+      getJob: getJobMock,
+      close: closeMock,
+    }));
+
+    await retryFailedJobs(
+      { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 'job-1', actor: 'admin-user' },
+      mockLogger,
+    );
+
+    expect(mockAuditLog).toHaveBeenCalledTimes(1);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: 'admin-user',
+        jobId: 'job-1',
+        action: 'job.retry',
+      }),
+    );
   });
 
   it('should return dry-run results without retrying jobs', async () => {
