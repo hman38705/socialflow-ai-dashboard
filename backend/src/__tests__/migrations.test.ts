@@ -14,6 +14,7 @@ import {
   MIGRATION_LOCK_TIMEOUT_MS,
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
+import { AppError } from '../lib/errors';
 
 describe('Migration Service — Lock, Checksum & Idempotency', () => {
   let redis: Redis;
@@ -371,6 +372,43 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
 
         expect(result2.executed).toContain(firstMigrationName);
       }
+    });
+  });
+
+  describe('Force Guard', () => {
+    it('should reject a force run without the required confirmation', async () => {
+      const appliedBefore = await redis.smembers(ADMIN_MIGRATIONS_SET_KEY);
+      const metadataBefore = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+
+      let caught: unknown;
+      try {
+        await runMigrations(
+          { dryRun: false, force: true },
+          mockLogger,
+        );
+      } catch (err) {
+        caught = err;
+      }
+
+      // The guard must reject the request rather than silently proceeding.
+      expect(caught).toBeInstanceOf(AppError);
+      const error = caught as AppError;
+      expect(error.statusCode).toBe(403);
+      expect(error.code).toBe('MIGRATION_FORCE_CONFIRMATION_REQUIRED');
+
+      // No migration should have been executed when the guard rejects.
+      const appliedAfter = await redis.smembers(ADMIN_MIGRATIONS_SET_KEY);
+      expect(appliedAfter).toEqual(appliedBefore);
+
+      const metadataAfter = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      expect(metadataAfter).toEqual(metadataBefore);
+
+      // The migration runner should never have been invoked.
+      const logCalls = (mockLogger.info as jest.Mock).mock.calls;
+      const runningCalls = logCalls.filter((call) =>
+        typeof call[0] === 'string' && call[0].includes('Running migration'),
+      );
+      expect(runningCalls.length).toBe(0);
     });
   });
 

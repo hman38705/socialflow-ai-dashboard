@@ -356,6 +356,94 @@ describe('getWebhook', () => {
   });
 });
 
+// ── Delivery truncation — empty bodies (#2038) ────────────────────────────────
+describe('webhook delivery truncation — empty bodies (#2038)', () => {
+  const TRUNCATION_MARKER = '[truncated]';
+
+  function deliveryApp() {
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res: Response, next: NextFunction) => {
+      req.user = { id: USER_ID };
+      next();
+    });
+    app.post('/deliver/:id', async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { id } = req.params;
+        const responseBody = (req.body as any).responseBody;
+        const storedBody =
+          typeof responseBody === 'string' ? responseBody : responseBody == null ? '' : String(responseBody);
+
+        await mockPrisma.webhookDelivery.update({
+          where: { id },
+          data: {
+            status: 'SUCCESS',
+            responseBody: storedBody,
+            errorMessage: null,
+          },
+        });
+
+        res.status(200).json({ success: true });
+      } catch (err) {
+        next(err);
+      }
+    });
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      res.status(err.statusCode ?? 500).json({ success: false, message: err.message });
+    });
+    return app;
+  }
+
+  function lastStoredBody() {
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    return calls[calls.length - 1][0].data.responseBody;
+  }
+
+  function lastStoredError() {
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    return calls[calls.length - 1][0].data.errorMessage;
+  }
+
+  it('stores an empty string body without a truncation marker and records no error', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-001').send({ responseBody: '' });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    expect(lastStoredBody()).toBe('');
+    expect(lastStoredBody()).not.toContain(TRUNCATION_MARKER);
+    expect(lastStoredError()).toBeNull();
+  });
+
+  it('stores a null body as empty without a truncation marker and records no error', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-002').send({ responseBody: null });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    expect(lastStoredBody()).toBe('');
+    expect(lastStoredBody()).not.toContain(TRUNCATION_MARKER);
+    expect(lastStoredError()).toBeNull();
+  });
+
+  it('stores an undefined body as empty without a truncation marker and records no error', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-003').send({});
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    expect(lastStoredBody()).toBe('');
+    expect(lastStoredBody()).not.toContain(TRUNCATION_MARKER);
+    expect(lastStoredError()).toBeNull();
+  });
+});
+
 // ── Idempotency: duplicate event ID ───────────────────────────────────────────
 describe('Inbound webhook — idempotency', () => {
   it('processes a new event ID exactly once', async () => {
