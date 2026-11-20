@@ -39,6 +39,14 @@ migrated.
 
 ---
 
+## Admin Audit Log
+
+Admin mutations write structured audit entries. The field schema and the list
+of covered admin actions are documented in
+[module-architecture.md](./module-architecture.md#admin-audit-log-fields).
+
+---
+
 ## Migration Plan
 
 Standalone files in `src/routes/` must be migrated into modules
