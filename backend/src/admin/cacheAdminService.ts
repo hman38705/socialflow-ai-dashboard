@@ -16,6 +16,8 @@ export interface ClearCacheOptions {
   pattern: string;
   batchSize: number;
   dryRun?: boolean;
+  /** Admin performing the clear; recorded in the audit log entry. */
+  actor?: string;
 }
 
 export interface ClearCacheResult {
@@ -24,6 +26,23 @@ export interface ClearCacheResult {
   deletedKeys: number;
   dryRun: boolean;
 }
+
+/**
+ * Writes an audit log entry for an admin cache clear. Kept as a small,
+ * injectable seam so tests can assert the audit write without touching
+ * the audit log schema or redaction rules.
+ */
+export const writeCacheClearAudit = (
+  logger: Logger,
+  entry: { actor: string; pattern: string; dryRun: boolean },
+): void => {
+  logger.info('Audit: admin cache clear', {
+    action: 'cache.clear',
+    actor: entry.actor,
+    pattern: entry.pattern,
+    dryRun: entry.dryRun,
+  });
+};
 
 export const clearCache = async (
   options: ClearCacheOptions,
@@ -67,6 +86,12 @@ export const clearCache = async (
     pattern: options.pattern,
     matchedKeys,
     deletedKeys,
+    dryRun,
+  });
+
+  writeCacheClearAudit(logger, {
+    actor: options.actor ?? 'unknown',
+    pattern: options.pattern,
     dryRun,
   });
 

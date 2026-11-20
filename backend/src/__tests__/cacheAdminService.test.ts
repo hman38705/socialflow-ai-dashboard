@@ -2,6 +2,7 @@ const mockScan = jest.fn();
 const mockUnlink = jest.fn();
 const mockInfo = jest.fn();
 const mockDbsize = jest.fn();
+const mockAuditLog = jest.fn();
 
 jest.mock('../lib/redis', () => ({
   redis: {
@@ -10,6 +11,10 @@ jest.mock('../lib/redis', () => ({
     info: (...args: unknown[]) => mockInfo(...args),
     dbsize: (...args: unknown[]) => mockDbsize(...args),
   },
+}));
+
+jest.mock('../lib/auditLogger', () => ({
+  auditLog: (...args: unknown[]) => mockAuditLog(...args),
 }));
 
 import { clearCache, getCacheStats, MAX_KEYS_PER_CALL } from '../admin/cacheAdminService';
@@ -142,6 +147,40 @@ describe('clearCache — key-pattern invalidation', () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
+});
+
+// ---------------------------------------------------------------------------
+// clearCache — audit logging
+// ---------------------------------------------------------------------------
+describe('clearCache — audit logging', () => {
+  it('writes an audit log entry recording the acting admin and pattern', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['audit:1', 'audit:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    await clearCache(
+      { pattern: 'audit:*', batchSize: 100, actorId: 'admin-42' },
+      mockLogger,
+    );
+
+    expect(mockAuditLog).toHaveBeenCalledTimes(1);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'admin-42',
+        action: 'cache.clear',
+        target: 'audit:*',
+      }),
+    );
+  });
+
+  it('does not write an audit entry when the audit call is removed', async () => {
+    mockScan.mockResolvedValueOnce(['0', []]);
+
+    await clearCache({ pattern: 'none:*', batchSize: 100, actorId: 'admin-7' }, mockLogger);
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actorId: 'admin-7', target: 'none:*' }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
