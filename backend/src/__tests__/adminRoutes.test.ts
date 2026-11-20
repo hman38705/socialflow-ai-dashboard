@@ -28,6 +28,8 @@ jest.mock('../admin/migrationService', () => ({
 
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { retryFailedJobs } from '../admin/jobAdminService';
+import { ErrorCodes } from '../lib/errors';
 
 const app = express();
 app.use(express.json());
@@ -99,5 +101,36 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin job retry batchSize bounds', () => {
+  // Maximum allowed batchSize for the retry endpoint.
+  const MAX_BATCH_SIZE = 100;
+
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (retryFailedJobs as jest.Mock).mockClear();
+  });
+
+  it('rejects a batchSize above the maximum with 400 and the central error code', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: MAX_BATCH_SIZE + 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body?.error?.code).toBe(ErrorCodes.VALIDATION_ERROR);
+    expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('accepts a batchSize at the maximum', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: MAX_BATCH_SIZE });
+
+    expect(res.status).toBe(200);
+    expect(retryFailedJobs).toHaveBeenCalled();
   });
 });

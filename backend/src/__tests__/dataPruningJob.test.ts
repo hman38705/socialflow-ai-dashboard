@@ -178,6 +178,36 @@ describe('dataPruningJob — Prometheus metrics emission', () => {
   });
 });
 
+// ── missing-path policy: ignore ───────────────────────────────────────────────
+describe('dataPruningJob — missing path policy: ignore', () => {
+  it('completes without throwing and without alerting when a retention path is absent', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'ignore',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+    });
+
+    await expect(capturedProcessor!()).resolves.not.toThrow();
+
+    // No missing-path alert emitted
+    expect(mockSpan.recordException).not.toHaveBeenCalled();
+    expect(mockSpan.setStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }),
+    );
+
+    // No pruning attempted for the missing path
+    expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
+    expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
+  });
+});
+
 // ── OpenTelemetry span lifecycle ──────────────────────────────────────────────
 describe('dataPruningJob — OpenTelemetry span lifecycle', () => {
   it('sets span status to OK after a successful pruning run', async () => {

@@ -7,6 +7,7 @@ import {
   RunMigrationsResult,
   MigrationMetadata,
 } from '../admin/migrationService';
+import { ErrorCode } from '../lib/errors';
 import {
   ADMIN_MIGRATIONS_SET_KEY,
   ADMIN_MIGRATIONS_LOCK_KEY,
@@ -371,6 +372,52 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
 
         expect(result2.executed).toContain(firstMigrationName);
       }
+    });
+  });
+
+  describe('Force Flag Guard', () => {
+    it('should reject force when the guard precondition is unmet', async () => {
+      // Apply migrations so metadata exists for the guard to inspect
+      await runMigrations({ dryRun: false }, mockLogger);
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      expect(Object.keys(metadata).length).toBeGreaterThan(0);
+
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      // Corrupt the stored checksum so the guard's precondition is unmet
+      const corrupted = JSON.parse(metadata[firstMigrationName]);
+      corrupted.checksum = 'corrupted-checksum-value';
+      await redis.hset(
+        ADMIN_MIGRATIONS_METADATA_KEY,
+        firstMigrationName,
+        JSON.stringify(corrupted),
+      );
+
+      // Force with an unmet precondition must be rejected via the central error shape
+      await expect(
+        runMigrations(
+          { dryRun: false, force: true, name: firstMigrationName },
+          mockLogger,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.MIGRATION_FORCE_GUARD_FAILED });
+    });
+
+    it('should accept force when the guard precondition holds', async () => {
+      // Apply migrations so metadata exists and checksums are intact
+      const initial = await runMigrations({ dryRun: false }, mockLogger);
+      expect(initial.executed.length).toBeGreaterThan(0);
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      // Precondition holds (checksums intact) — force should proceed and re-execute
+      const result = await runMigrations(
+        { dryRun: false, force: true, name: firstMigrationName },
+        mockLogger,
+      );
+
+      expect(result.executed).toContain(firstMigrationName);
     });
   });
 
