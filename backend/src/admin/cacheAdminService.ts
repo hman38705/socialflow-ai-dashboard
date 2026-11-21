@@ -12,6 +12,39 @@ export interface CacheStats {
 /** Upper bound on keys examined per clearCache call. */
 export const MAX_KEYS_PER_CALL = 100_000;
 
+/**
+ * Typed error raised when a cache clear pattern is not on the allowlist.
+ * Routes can map this to a 4xx response instead of a raw string.
+ */
+export class DisallowedCachePatternError extends Error {
+  readonly code = 'DISALLOWED_CACHE_PATTERN';
+  readonly pattern: string;
+
+  constructor(pattern: string) {
+    super(`Cache clear pattern is not allowed: ${pattern}`);
+    this.name = 'DisallowedCachePatternError';
+    this.pattern = pattern;
+  }
+}
+
+/**
+ * Allowlist of permitted cache clear patterns. A bare wildcard such as `*`
+ * (or any pattern that would match every key) is rejected before any Redis
+ * scan or delete is issued.
+ */
+export const ALLOWED_CACHE_PATTERNS: readonly string[] = [
+  'cache:*',
+  'session:*',
+  'rate:*',
+];
+
+export const isAllowedCachePattern = (pattern: string): boolean => {
+  if (!pattern || pattern === '*') {
+    return false;
+  }
+  return ALLOWED_CACHE_PATTERNS.some((allowed) => pattern.startsWith(allowed));
+};
+
 export interface ClearCacheOptions {
   pattern: string;
   batchSize: number;
@@ -48,6 +81,13 @@ export const clearCache = async (
   options: ClearCacheOptions,
   logger: Logger,
 ): Promise<ClearCacheResult> => {
+  if (!isAllowedCachePattern(options.pattern)) {
+    logger.warn('Rejected disallowed cache clear pattern', {
+      pattern: options.pattern,
+    });
+    throw new DisallowedCachePatternError(options.pattern);
+  }
+
   const dryRun = Boolean(options.dryRun);
   logger.info('Scanning Redis keys for cache clear', {
     pattern: options.pattern,
