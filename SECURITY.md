@@ -32,3 +32,32 @@ We take security seriously and will respond to your report within 48-72 hours. W
 ## Disclosure Policy
 
 We follow a coordinated disclosure policy. We ask that you give us a reasonable amount of time to investigate and fix the vulnerability before disclosing it publicly. Once a fix is available, we will publish a security advisory and credit the researcher (if desired).
+
+## Admin Audit Log
+
+Administrative actions that change state are recorded in an audit log so that operators and auditors can reconstruct who did what, and when. The following admin actions must produce an audit entry:
+
+- Creating, updating, or deleting users and their roles or permissions.
+- Changing organization or workspace settings, including security and integration configuration.
+- Rotating, revoking, or regenerating API keys, tokens, and webhook secrets.
+- Enabling, disabling, or modifying audit, retention, or pruning settings.
+- Exporting or deleting data in bulk.
+
+### Recorded Fields
+
+Each audit entry records:
+
+- The acting admin's identity (user ID and, where available, email).
+- The action performed and the target resource type and identifier.
+- A timestamp of when the action occurred.
+- The originating request context (such as source IP address and user agent).
+- The outcome of the action (success or failure).
+- A before/after summary of the changed fields, with sensitive values redacted as described below.
+
+### Redaction Rules
+
+Sensitive values are redacted before an audit entry is stored. Fields whose names indicate credentials or payment data — including `password`, `token`, `cardNumber`, `cvv`, and `secret` — are replaced with the literal string `[REDACTED]`. Redaction is applied recursively to nested objects and arrays so that sensitive values are never persisted in cleartext, even when nested inside request payloads.
+
+### Storage and Retention
+
+Audit entries are stored in the application database alongside other operational records. Retention and pruning of audit entries follow the policy described in [the retention and pruning policy](backend/docs/retention-pruning-policy.md); refer to that document for the authoritative retention windows and pruning behavior.

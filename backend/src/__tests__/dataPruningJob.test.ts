@@ -55,7 +55,10 @@ jest.mock('../config/runtime', () => ({
   getRedisConnection: () => ({}),
   getDataRetentionConfig: mockGetDataRetentionConfig,
 }));
-jest.mock('../lib/logger', () => ({ createLogger: () => ({ info: jest.fn(), error: jest.fn() }) }));
+const mockLoggerWarn = jest.fn();
+jest.mock('../lib/logger', () => ({
+  createLogger: () => ({ info: jest.fn(), warn: mockLoggerWarn, error: jest.fn() }),
+}));
 
 import { startDataPruningJob } from '../jobs/dataPruningJob';
 
@@ -209,6 +212,41 @@ describe('dataPruningJob — missing path policy: ignore', () => {
     );
 
     // No pruning attempted for the missing path
+    expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
+    expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
+  });
+});
+
+// ── missing-path policy: warn ─────────────────────────────────────────────────
+describe('dataPruningJob — missing path policy: warn', () => {
+  it('completes, logs the missing path, increments the threshold counter and skips pruning', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'warn',
+      missingPathAlertThreshold: 1,
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs/missing'],
+    });
+
+    await expect(capturedProcessor!()).resolves.not.toThrow();
+
+    // Missing path is logged as a warning
+    expect(mockLoggerWarn).toHaveBeenCalled();
+    const warnSerialized = JSON.stringify(mockLoggerWarn.mock.calls);
+    expect(warnSerialized).toContain('/logs/missing');
+
+    // Alert threshold counter increments: one missing path meets threshold of 1
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(mockSendAlert.mock.calls[0][0])).toContain('/logs/missing');
+
+    // No deletion or archival attempted for the missing path
     expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
     expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
   });

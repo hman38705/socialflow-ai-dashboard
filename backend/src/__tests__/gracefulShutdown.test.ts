@@ -104,6 +104,49 @@ describe('sseTicketService — sweep interval', () => {
     expect(handle).toBeDefined();
     expect(handle!.hasRef()).toBe(false);
   });
+
+  it('captures the sweep interval handle via setInterval and asserts it is unref\'d', () => {
+    // Isolate from other timers in the shutdown suite
+    jest.useRealTimers();
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+
+    // Stop any pre-existing interval so start() creates a fresh one
+    (sseTicketService as any).stop?.();
+
+    try {
+      sseTicketService.start();
+
+      expect(setIntervalSpy).toHaveBeenCalled();
+      const handle = setIntervalSpy.mock.results[setIntervalSpy.mock.results.length - 1]
+        .value as NodeJS.Timeout;
+      expect(handle).toBeDefined();
+      expect(typeof handle.hasRef).toBe('function');
+      expect(handle.hasRef()).toBe(false);
+      expect((sseTicketService as any).sweepInterval).toBe(handle);
+    } finally {
+      setIntervalSpy.mockRestore();
+      clearIntervalSpy.mockRestore();
+    }
+  });
+
+  it('clears the sweep interval on shutdown so no timer remains after close', () => {
+    jest.useRealTimers();
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+
+    try {
+      sseTicketService.start();
+      const handle = (sseTicketService as any).sweepInterval as NodeJS.Timeout | undefined;
+      expect(handle).toBeDefined();
+
+      (sseTicketService as any).stop?.();
+
+      expect(clearIntervalSpy).toHaveBeenCalledWith(handle);
+      expect((sseTicketService as any).sweepInterval).toBeUndefined();
+    } finally {
+      clearIntervalSpy.mockRestore();
+    }
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
