@@ -76,6 +76,53 @@ describe('SSE ticket validation', () => {
   });
 });
 
+describe('#2030 SSE ticket map eviction order', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('evicts the oldest ticket first at the cap and keeps a fresh ticket', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    const cap: number = (sseTicketService as any).maxTickets ?? (sseTicketService as any).cap;
+    expect(typeof cap).toBe('number');
+
+    const oldest = sseTicketService.issueTicket('user-oldest');
+    const tickets: string[] = [];
+    for (let i = 0; i < cap - 1; i++) {
+      tickets.push(sseTicketService.issueTicket(`user-${i}`));
+    }
+    const fresh = sseTicketService.issueTicket('user-fresh');
+
+    expect(sseTicketService.consumeTicket(oldest)).toBeFalsy();
+    expect(sseTicketService.consumeTicket(fresh)).toBeTruthy();
+    expect(sseTicketService.consumeTicket(tickets[tickets.length - 1])).toBeTruthy();
+  });
+
+  it('sweeps expired tickets before evicting live ones', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    const cap: number = (sseTicketService as any).maxTickets ?? (sseTicketService as any).cap;
+    const ttl: number = (sseTicketService as any).ttlMs ?? (sseTicketService as any).ttl;
+
+    const expired: string[] = [];
+    for (let i = 0; i < cap; i++) {
+      expired.push(sseTicketService.issueTicket(`expired-${i}`));
+    }
+
+    jest.advanceTimersByTime(ttl + 1);
+
+    const live = sseTicketService.issueTicket('live-user');
+    sseTicketService.sweep();
+
+    for (const t of expired) {
+      expect(sseTicketService.consumeTicket(t)).toBeFalsy();
+    }
+    expect(sseTicketService.consumeTicket(live)).toBeTruthy();
+  });
+});
+
 describe('#1984 SSE ticket TTL expiry', () => {
   afterEach(() => {
     jest.useRealTimers();

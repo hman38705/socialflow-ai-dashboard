@@ -601,11 +601,35 @@ describe('Admin dryRun flag validation', () => {
     jest.clearAllMocks();
   });
 
+  it('accepts a valid boolean dryRun', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true, dryRun: true });
+
+    expect(res.status).not.toBe(400);
+    expect(runMigrations).toHaveBeenCalledTimes(1);
+    const callArg = (runMigrations as jest.Mock).mock.calls[0][0];
+    expect(callArg?.dryRun).toBe(true);
+  });
+
   it('rejects dryRun as a string with a 400 naming dryRun', async () => {
     const res = await request(app)
       .post('/admin/migrations/run')
       .set('x-test-user-id', 'admin-user')
-      .send({ dryRun: 'true' });
+      .send({ force: true, dryRun: 'yes' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'dryRun')).toBe(true);
+    expect(runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('rejects dryRun as a number with a 400 naming dryRun', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true, dryRun: 1 });
 
     expect(res.status).toBe(400);
     expect(Array.isArray(res.body.errors)).toBe(true);

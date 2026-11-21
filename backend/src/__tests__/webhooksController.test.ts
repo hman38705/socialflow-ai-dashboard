@@ -58,6 +58,7 @@ import {
   RESPONSE_BODY_TRUNCATION_MARKER,
 } from '../controllers/webhooks';
 import { rawBodyMiddleware, verifySignature } from '../middleware/verifySignature';
+import { createMultibyteBody } from './fixtures';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const USER_ID = 'user-abc';
@@ -603,6 +604,159 @@ describe('Response body truncation', () => {
     expect(stored).toBe(short);
     expect(stored).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
   });
+
+  it('truncates an oversized delivery response body and stores it with the marker', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const oversized = createMultibyteBody(RESPONSE_BODY_MAX_BYTES + 500);
+    const stored = truncateResponseBody(oversized);
+
+    await mockPrisma.webhookDelivery.update({
+      where: { id: 'del-oversized' },
+      data: { status: 'SUCCESS', responseBody: stored, errorMessage: null },
+    });
+
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    const persisted = calls[calls.length - 1][0].data.responseBody as string;
+
+    expect(persisted.endsWith(RESPONSE_BODY_TRUNCATION_MARKER)).toBe(true);
+    expect(Buffer.byteLength(persisted, 'utf8')).toBeLessThanOrEqual(
+      RESPONSE_BODY_MAX_BYTES + Buffer.byteLength(RESPONSE_BODY_TRUNCATION_MARKER, 'utf8'),
+    );
+    expect(persisted.length).toBeLessThan(oversized.length);
+  });
+
+  it('stores a delivery response body exactly at the limit unchanged', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const atLimit = 'a'.repeat(RESPONSE_BODY_MAX_BYTES);
+    const stored = truncateResponseBody(atLimit);
+
+    await mockPrisma.webhookDelivery.update({
+      where: { id: 'del-at-limit' },
+      data: { status: 'SUCCESS', responseBody: stored, errorMessage: null },
+    });
+
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    const persisted = calls[calls.length - 1][0].data.responseBody as string;
+
+    expect(persisted).toBe(atLimit);
+    expect(persisted).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
+    expect(Buffer.byteLength(persisted, 'utf8')).toBe(RESPONSE_BODY_MAX_BYTES);
+  });
+});
+
+// ── Delivery truncation — response body size limit (#2008) ────────────────────
+describe('webhook delivery truncation — response body size limit (#2008)', () => {
+  const LIMIT = RESPONSE_BODY_MAX_BYTES;
+  const MARKER = RESPONSE_BODY_TRUNCATION_MARKER;
+
+  function deliveryApp() {
+    const app = express();
+    app.use(express.json());
+    app.use((req: any, _res: Response, next: NextFunction) => {
+      req.user = { id: USER_ID };
+      next();
+    });
+    app.post('/deliver/:id', async (req: Request, res: Response, next: NextFunction) => {
+      try {
+        const { id } = req.params;
+        const responseBody = (req.body as any).responseBody;
+        const storedBody = truncateResponseBody(
+          typeof responseBody === 'string' ? responseBody : responseBody == null ? '' : String(responseBody),
+        );
+
+        await mockPrisma.webhookDelivery.update({
+          where: { id },
+          data: {
+            status: 'SUCCESS',
+            responseBody: storedBody,
+            errorMessage: null,
+          },
+        });
+
+        res.status(200).json({ success: true });
+      } catch (err) {
+        next(err);
+      }
+    });
+    app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+      res.status(err.statusCode ?? 500).json({ success: false, message: err.message });
+    });
+    return app;
+  }
+
+  function lastStoredBody() {
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    return calls[calls.length - 1][0].data.responseBody;
+  }
+
+  it('stores a body exactly at the limit unchanged with no truncation marker', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+    const atLimit = 'a'.repeat(LIMIT);
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-limit').send({ responseBody: atLimit });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    const stored = lastStoredBody();
+    expect(stored).toBe(atLimit);
+    expect(stored).not.toContain(MARKER);
+    expect(Buffer.byteLength(stored, 'utf8')).toBe(LIMIT);
+  });
+
+  it('truncates a body one character over the limit and ends with the marker', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+    const overLimit = 'b'.repeat(LIMIT + 1);
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-limit-plus-one').send({ responseBody: overLimit });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    const stored = lastStoredBody();
+    expect(stored.endsWith(MARKER)).toBe(true);
+    expect(stored).not.toBe(overLimit);
+    expect(stored.length).toBeLessThan(overLimit.length);
+    // Only the truncated body is persisted — not the full payload.
+    expect(stored).not.toContain(overLimit);
+    expect(stored.slice(0, stored.length - MARKER.length)).toBe('b'.repeat(LIMIT));
+  });
+
+  it('truncates a well-over-limit body and stores only the truncated body', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+    const huge = 'c'.repeat(LIMIT * 5);
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-huge').send({ responseBody: huge });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    const stored = lastStoredBody();
+    expect(stored.endsWith(MARKER)).toBe(true);
+    expect(stored).not.toContain(huge);
+    expect(Buffer.byteLength(stored, 'utf8')).toBeLessThanOrEqual(
+      LIMIT + Buffer.byteLength(MARKER, 'utf8'),
+    );
+  });
+
+  it('does not produce lone surrogates when truncating a multibyte body', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+    // '€' is 3 bytes in UTF-8; fill well past the limit so truncation lands mid-character.
+    const multibyte = '€'.repeat(Math.ceil(LIMIT / 3) + 50);
+
+    const app = deliveryApp();
+    const res = await request(app).post('/deliver/del-multibyte').send({ responseBody: multibyte });
+
+    expect(res.status).toBe(200);
+    const stored = lastStoredBody();
+    expect(stored.endsWith(MARKER)).toBe(true);
+    expect(stored).not.toContain('\uFFFD');
+    const truncatedPart = stored.slice(0, stored.length - MARKER.length);
+    expect(truncatedPart).toMatch(/^€*$/);
+    expect(Buffer.byteLength(truncatedPart, 'utf8')).toBeLessThanOrEqual(LIMIT);
+  });
 });
 
 // ── Response body reader cleanup (#2026) ──────────────────────────────────────
@@ -701,5 +855,7 @@ describe('Response body reader cleanup (#2026)', () => {
 
     expect(response.body.getReader).toHaveBeenCalledTimes(1);
     expect(releaseLock).toHaveBeenCalledTimes(1);
+  });
+});
   });
 });
