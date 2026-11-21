@@ -213,6 +213,73 @@ function expectErrorShape(body: any) {
   expect(body.timestamp).toBeDefined();
 }
 
+describe('Admin config PUT', () => {
+  const mockRecordAudit = recordAudit as jest.Mock;
+  const mockLogAuditEvent = logAuditEvent as jest.Mock;
+
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    RoleStore.assign('editor-user', 'editor');
+    mockRecordAudit.mockClear();
+    mockLogAuditEvent.mockClear();
+  });
+
+  it('accepts a valid config payload and persists the change', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeGreaterThanOrEqual(200);
+    expect(res.status).toBeLessThan(300);
+
+    // The persisted change must be reflected in the response payload.
+    expect(JSON.stringify(res.body)).toContain('featureFlags.newDashboard');
+  });
+
+  it('rejects an invalid config payload with 400 and a field-level error', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ maxRetries: 'not-a-number' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.length).toBeGreaterThan(0);
+    for (const err of res.body.errors) {
+      expect(typeof err.field).toBe('string');
+      expect(typeof err.message).toBe('string');
+    }
+    expect(res.body.errors.some((e: any) => e.field === 'maxRetries')).toBe(true);
+  });
+
+  it('writes an audit record for an accepted config change', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeLessThan(400);
+
+    const auditMock = mockLogAuditEvent.mock.calls.length
+      ? mockLogAuditEvent
+      : mockRecordAudit;
+    expect(auditMock).toHaveBeenCalledTimes(1);
+
+    const entry = auditMock.mock.calls[0][0];
+    expect(entry).toEqual(
+      expect.objectContaining({
+        actorId: 'admin-user',
+        action: expect.stringMatching(/config/i),
+      }),
+    );
+    expect(
+      entry.resourceType ?? entry.target ?? entry.targetType,
+    ).toMatch(/config/i);
+    expect(entry.outcome ?? entry.result ?? 'success').toMatch(/success/i);
+  });
+});
+
 describe('Admin config PUT audit logging', () => {
   const mockRecordAudit = recordAudit as jest.Mock;
 

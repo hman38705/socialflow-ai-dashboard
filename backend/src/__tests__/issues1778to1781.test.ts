@@ -50,6 +50,54 @@ describe('#1779 config', () => {
   });
 });
 
+describe('#1984 SSE ticket TTL expiry', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('rejects a ticket after its TTL elapses and the sweep runs', () => {
+    jest.useFakeTimers();
+    const { SseTicketService } = require('../services/sseTicketService');
+    const service = new SseTicketService();
+    const ticket = service.issue('user-1');
+    expect(service.consume(ticket)).toBeDefined();
+
+    const ticket2 = service.issue('user-2');
+    jest.advanceTimersByTime(service.ttlMs + 1);
+    service.sweep();
+
+    expect(service.consume(ticket2)).toBeUndefined();
+  });
+
+  it('accepts a ticket still within its TTL after a sweep', () => {
+    jest.useFakeTimers();
+    const { SseTicketService } = require('../services/sseTicketService');
+    const service = new SseTicketService();
+    const ticket = service.issue('user-1');
+
+    jest.advanceTimersByTime(Math.floor(service.ttlMs / 2));
+    service.sweep();
+
+    expect(service.consume(ticket)).toBeDefined();
+  });
+
+  it('sweep deletes expired entries from the ticket map', () => {
+    jest.useFakeTimers();
+    const { SseTicketService } = require('../services/sseTicketService');
+    const service = new SseTicketService();
+    service.issue('user-1');
+    service.issue('user-2');
+    const tickets = (service as any).tickets as Map<string, unknown>;
+    expect(tickets.size).toBe(2);
+
+    jest.advanceTimersByTime(service.ttlMs + 1);
+    service.sweep();
+
+    expect(tickets.size).toBe(0);
+  });
+});
+
 describe('#2046 SSE ticket sweep interval teardown', () => {
   afterEach(() => {
     jest.useRealTimers();

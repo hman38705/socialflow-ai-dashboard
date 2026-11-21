@@ -150,42 +150,60 @@ The HTTP contract (request/response shapes and error codes) is described in `ope
 
 ---
 
-## Admin audit log fields
+## Admin audit log contract
 
-Admin mutations write structured audit entries through the shared audit middleware (`src/shared/middleware/audit.ts`). The field schema below is the reference for new admin endpoints and for reviewers verifying completeness. It is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.
+Admin mutations write structured audit entries through the shared audit middleware (`src/shared/middleware/audit.ts`). This section is the written contract for new admin endpoints and for reviewers verifying completeness. It is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.
 
-### Recorded fields
+This section documents the contract only. Implementing the audit writes is tracked by the admin audit-log issue in the current batch, and the audit log data model and retention policy are out of scope here.
 
-| Field | Description |
-|---|---|
-| `actorId` | ID of the authenticated user performing the mutation |
-| `actorEmail` | Email of the acting user (redacted where required) |
-| `actorRole` | Role of the acting user at the time of the action |
-| `action` | Stable action identifier (e.g. `admin.cache.clear`, `admin.job.retry`) |
-| `targetType` | Type of the resource acted on (e.g. `cache`, `job`, `migration`, `config`) |
-| `targetId` | Identifier of the affected resource, when applicable |
-| `method` | HTTP method of the originating request |
-| `path` | Request path of the originating request |
-| `statusCode` | Response status code returned to the caller |
-| `ip` | Client IP address of the request |
-| `userAgent` | Client user agent of the request |
-| `requestId` | Correlation ID propagated from the request middleware |
-| `metadata` | Action-specific details (redacted per `auditRedaction.test.ts`) |
-| `createdAt` | Timestamp when the audit entry was written |
+### Admin mutations that must be audited
+
+Every admin mutation that changes state must write exactly one audit entry. The stable action identifiers below are the values written to the `action` field; new admin routes must follow the same `admin.<domain>.<verb>` naming.
+
+| Mutation | Action identifier | `targetType` | Description |
+|---|---|---|---|
+| Cache clear | `admin.cache.clear` | `cache` | Flushes application caches via the admin cache endpoint |
+| Job retry | `admin.job.retry` | `job` | Re-enqueues a failed background job |
+| Migration run | `admin.migration.run` | `migration` | Applies pending database migrations |
+| Migration rollback | `admin.migration.rollback` | `migration` | Rolls back the most recent migration |
+| Config PUT | `admin.config.update` | `config` | Updates runtime configuration values |
+
+Read-only admin endpoints (list, get, status) do not write audit entries. Any new admin mutation must be added to this table in the same PR that introduces it.
+
+### Required audit entry fields
+
+| Field | Required | Description |
+|---|---|---|
+| `actorId` | Yes | ID of the authenticated user performing the mutation |
+| `actorEmail` | Yes | Email of the acting user (redacted where required) |
+| `actorRole` | Yes | Role of the acting user at the time of the action |
+| `action` | Yes | Stable action identifier from the table above (e.g. `admin.cache.clear`) |
+| `targetType` | Yes | Type of the resource acted on (e.g. `cache`, `job`, `migration`, `config`) |
+| `targetId` | When applicable | Identifier of the affected resource |
+| `statusCode` | Yes | Response status code returned to the caller — the outcome of the mutation |
+| `method` | Yes | HTTP method of the originating request |
+| `path` | Yes | Request path of the originating request |
+| `ip` | Yes | Client IP address of the request |
+| `userAgent` | Yes | Client user agent of the request |
+| `requestId` | Yes | Correlation ID propagated from the request middleware |
+| `metadata` | Yes | Action-specific details (redacted per `auditRedaction.test.ts`) |
+| `createdAt` | Yes | Timestamp when the audit entry was written |
+
+The outcome of a mutation is captured by `statusCode`: a 2xx status records a successful mutation, while a 4xx/5xx status records a failed or rejected attempt. The entry is written in both cases.
 
 Sensitive values inside `metadata` (tokens, secrets, credentials) are redacted before persistence; see `src/__tests__/auditRedaction.test.ts` for the redaction contract.
 
-### Covered admin actions
+### Where the audit write belongs
 
-| Action | Description |
-|---|---|
-| Cache clear | Flushes application caches via the admin cache endpoint |
-| Job retry | Re-enqueues a failed background job |
-| Migration run | Applies pending database migrations |
-| Migration rollback | Rolls back the most recent migration |
-| Config PUT | Updates runtime configuration values |
+The audit write belongs in the shared audit middleware, not in individual handlers. The middleware is mounted on the admin router so that it observes every admin request, and it writes the entry **after the handler resolves, on response finish**, capturing the outcome status from the response:
 
-Endpoints that do not yet emit audit entries are tracked by the audit logging issues in the current batch; this section documents the schema only.
+```
+authenticate → checkPermission → validate(schema, target) → route handler → response finish → audit write
+```
+
+Because the write happens on response finish, the entry reflects the actual outcome (`statusCode`) rather than the intent of the request. Handlers must not write audit entries themselves; they only supply action-specific details through `metadata` (for example the job id or migration name) so the middleware can record them.
+
+When adding a new admin route, mount it behind the shared audit middleware and add its action identifier to the table above — do not write audit entries inside the handler.
 
 ---
 
