@@ -116,6 +116,45 @@ Tickets are **per-process**: they live in an in-memory map on the instance that 
 
 ---
 
+## Admin audit log fields
+
+Admin mutations write structured audit entries through the shared audit middleware (`src/shared/middleware/audit.ts`). The field schema below is the reference for new admin endpoints and for reviewers verifying completeness. It is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.
+
+### Recorded fields
+
+| Field | Description |
+|---|---|
+| `actorId` | ID of the authenticated user performing the mutation |
+| `actorEmail` | Email of the acting user (redacted where required) |
+| `actorRole` | Role of the acting user at the time of the action |
+| `action` | Stable action identifier (e.g. `admin.cache.clear`, `admin.job.retry`) |
+| `targetType` | Type of the resource acted on (e.g. `cache`, `job`, `migration`, `config`) |
+| `targetId` | Identifier of the affected resource, when applicable |
+| `method` | HTTP method of the originating request |
+| `path` | Request path of the originating request |
+| `statusCode` | Response status code returned to the caller |
+| `ip` | Client IP address of the request |
+| `userAgent` | Client user agent of the request |
+| `requestId` | Correlation ID propagated from the request middleware |
+| `metadata` | Action-specific details (redacted per `auditRedaction.test.ts`) |
+| `createdAt` | Timestamp when the audit entry was written |
+
+Sensitive values inside `metadata` (tokens, secrets, credentials) are redacted before persistence; see `src/__tests__/auditRedaction.test.ts` for the redaction contract.
+
+### Covered admin actions
+
+| Action | Description |
+|---|---|
+| Cache clear | Flushes application caches via the admin cache endpoint |
+| Job retry | Re-enqueues a failed background job |
+| Migration run | Applies pending database migrations |
+| Migration rollback | Rolls back the most recent migration |
+| Config PUT | Updates runtime configuration values |
+
+Endpoints that do not yet emit audit entries are tracked by the audit logging issues in the current batch; this section documents the schema only.
+
+---
+
 ## Contribution guidelines
 
 **Adding a new feature:**
