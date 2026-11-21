@@ -214,6 +214,49 @@ describe('cursorSchema — page-size clamping (#1109)', () => {
   });
 });
 
+// ── Admin limit parameter default ────────────────────────────────────────────
+
+describe('admin limit parameter default (#2025)', () => {
+  const DOCUMENTED_DEFAULT_LIMIT = 20;
+
+  it('applies the documented default limit when the parameter is omitted', () => {
+    const result = pageLimitSchema.safeParse({});
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.limit).toBe(DOCUMENTED_DEFAULT_LIMIT);
+      expect(typeof result.data.limit).toBe('number');
+    }
+  });
+
+  it('honours an explicit limit and keeps it numeric', () => {
+    const result = pageLimitSchema.safeParse({ limit: 50 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.limit).toBe(50);
+      expect(typeof result.data.limit).toBe('number');
+    }
+  });
+
+  it('applies the default when limit is absent but other params are present', () => {
+    const result = pageLimitSchema.safeParse({ page: 3 });
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.limit).toBe(DOCUMENTED_DEFAULT_LIMIT);
+      expect(typeof result.data.limit).toBe('number');
+    }
+  });
+
+  it('applies the default via a request built with fakeReq', () => {
+    const req = fakeReq();
+    const result = pageLimitSchema.safeParse(req.query);
+    expect(result.success).toBe(true);
+    if (result.success) {
+      expect(result.data.limit).toBe(DOCUMENTED_DEFAULT_LIMIT);
+      expect(typeof result.data.limit).toBe('number');
+    }
+  });
+});
+
 // ── buildCursorResponse — hasNextPage ────────────────────────────────────────
 
 describe('buildCursorResponse — hasNextPage (#1109)', () => {
