@@ -184,6 +184,36 @@ describe('dataPruningJob — Prometheus metrics emission', () => {
   });
 });
 
+// ── missing-path policy: ignore ───────────────────────────────────────────────
+describe('dataPruningJob — missing path policy: ignore', () => {
+  it('completes without throwing and without alerting when a retention path is absent', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'ignore',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+    });
+
+    await expect(capturedProcessor!()).resolves.not.toThrow();
+
+    // No missing-path alert emitted
+    expect(mockSpan.recordException).not.toHaveBeenCalled();
+    expect(mockSpan.setStatus).not.toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }),
+    );
+
+    // No pruning attempted for the missing path
+    expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
+    expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
+  });
+});
+
 // ── missing-path alert threshold ──────────────────────────────────────────────
 describe('dataPruningJob — missing-path alert threshold', () => {
   it('does not send an alert when the missing-path count is below the threshold', async () => {

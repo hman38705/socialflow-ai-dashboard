@@ -46,6 +46,7 @@ import { logAuditEvent } from '../services/auditLogService';
 import { retryFailedJobs } from '../admin/jobAdminService';
 import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
 import { runMigrations, rollbackMigration } from '../admin/migrationService';
+import { ErrorCodes } from '../lib/errors';
 
 const app = express();
 app.use(express.json());
@@ -185,7 +186,7 @@ describe('Admin config audit logging', () => {
   });
 });
 
-describe('Admin numeric input validation', () => {
+describe('Admin job retry batchSize bounds', () => {
   beforeEach(() => {
     RoleStore.assign('admin-user', 'admin');
     (retryFailedJobs as jest.Mock).mockClear();
@@ -216,17 +217,28 @@ describe('Admin numeric input validation', () => {
     expect(retryFailedJobs).not.toHaveBeenCalled();
   });
 
-  it('enforces the upper bound on batchSize', async () => {
+  it('rejects a batchSize above the maximum with 400 and the central error code', async () => {
     const res = await request(app)
       .post('/admin/jobs/retry')
       .set('x-test-user-id', 'admin-user')
       .send({ batchSize: MAX_BATCH_SIZE + 1 });
 
     expect(res.status).toBe(400);
+    expect(res.body?.error?.code).toBe(ErrorCodes.VALIDATION_ERROR);
     expect(res.body).toEqual(
       expect.objectContaining({ error: expect.any(String) }),
     );
     expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('accepts a batchSize at the maximum', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: MAX_BATCH_SIZE });
+
+    expect(res.status).toBe(200);
+    expect(retryFailedJobs).toHaveBeenCalled();
   });
 
   it('applies the default limit when omitted', async () => {
