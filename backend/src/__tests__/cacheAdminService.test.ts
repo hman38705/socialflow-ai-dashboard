@@ -13,7 +13,7 @@ jest.mock('../lib/redis', () => ({
   },
 }));
 
-jest.mock('../lib/auditLog', () => ({
+jest.mock('../lib/auditLogger', () => ({
   auditLog: (...args: unknown[]) => mockAuditLog(...args),
 }));
 
@@ -108,11 +108,11 @@ describe('clearCache — key-pattern invalidation', () => {
       .mockResolvedValueOnce(['0', ['c']]);
     mockUnlink.mockResolvedValueOnce(2).mockResolvedValueOnce(1);
 
-    const result = await clearCache({ pattern: '*', batchSize: 100 }, mockLogger);
+    const result = await clearCache({ pattern: 'feed:*', batchSize: 100 }, mockLogger);
 
     expect(mockScan).toHaveBeenCalledTimes(2);
-    expect(mockScan).toHaveBeenNthCalledWith(1, '0', 'MATCH', '*', 'COUNT', 100);
-    expect(mockScan).toHaveBeenNthCalledWith(2, '42', 'MATCH', '*', 'COUNT', 100);
+    expect(mockScan).toHaveBeenNthCalledWith(1, '0', 'MATCH', 'feed:*', 'COUNT', 100);
+    expect(mockScan).toHaveBeenNthCalledWith(2, '42', 'MATCH', 'feed:*', 'COUNT', 100);
     expect(result.matchedKeys).toBe(3);
   });
 
@@ -158,6 +158,59 @@ describe('clearCache — key-pattern invalidation', () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
+  it('rejects a pattern outside the allowlist without deleting keys', async () => {
+    await expect(
+      clearCache({ pattern: 'tenant:*:secret', batchSize: 100 }, mockLogger),
+    ).rejects.toThrow(Error);
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it('allows a permitted pattern to reach the delete path', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['feed:1', 'feed:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    const result = await clearCache({ pattern: 'feed:*', batchSize: 100 }, mockLogger);
+
+    expect(result.deletedKeys).toBe(2);
+    expect(mockUnlink).toHaveBeenCalledWith('feed:1', 'feed:2');
+  });
+
+});
+
+// ---------------------------------------------------------------------------
+// clearCache — audit logging
+// ---------------------------------------------------------------------------
+describe('clearCache — audit logging', () => {
+  it('writes an audit log entry recording the acting admin and pattern', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['audit:1', 'audit:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    await clearCache(
+      { pattern: 'audit:*', batchSize: 100, actorId: 'admin-42' },
+      mockLogger,
+    );
+
+    expect(mockAuditLog).toHaveBeenCalledTimes(1);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorId: 'admin-42',
+        action: 'cache.clear',
+        target: 'audit:*',
+      }),
+    );
+  });
+
+  it('does not write an audit entry when the audit call is removed', async () => {
+    mockScan.mockResolvedValueOnce(['0', []]);
+
+    await clearCache({ pattern: 'none:*', batchSize: 100, actorId: 'admin-7' }, mockLogger);
+
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({ actorId: 'admin-7', target: 'none:*' }),
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -202,6 +255,29 @@ describe('clearCache — audit logging', () => {
 // clearCache — pattern allowlist (regression guard for closed issue #1757)
 // ---------------------------------------------------------------------------
 describe('clearCache — pattern allowlist (issue #1757)', () => {
+  it('rejects a wildcard pattern without scanning or deleting', async () => {
+    await expect(
+      clearCache({ pattern: '*', batchSize: 100 }, mockLogger),
+    ).rejects.toThrow();
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it('rejects a wildcard pattern with a typed error, not a raw string', async () => {
+    let caught: unknown;
+    try {
+      await clearCache({ pattern: '*', batchSize: 100 }, mockLogger);
+    } catch (err) {
+      caught = err;
+    }
+
+    expect(caught).toBeInstanceOf(Error);
+    expect(typeof caught).not.toBe('string');
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
   it('rejects a wildcard-only pattern', () => {
     expect(isPatternAllowed('*')).toBe(false);
     expect(isPatternAllowed('**')).toBe(false);
@@ -225,7 +301,7 @@ describe('clearCache — pattern allowlist (issue #1757)', () => {
     expect(isPatternAllowed('Jwt:*')).toBe(false);
   });
 
-  it('accepts an allowed pattern and proceeds to scan Redis', async () => {
+  it('accepts a permitted namespaced pattern and reaches the Redis client', async () => {
     expect(isPatternAllowed('feed:*')).toBe(true);
 
     mockScan.mockResolvedValueOnce(['0', ['feed:1']]);
@@ -234,6 +310,7 @@ describe('clearCache — pattern allowlist (issue #1757)', () => {
     const result = await clearCache({ pattern: 'feed:*', batchSize: 100 }, mockLogger);
 
     expect(mockScan).toHaveBeenCalledWith('0', 'MATCH', 'feed:*', 'COUNT', 100);
+    expect(mockUnlink).toHaveBeenCalledWith('feed:1');
     expect(result.deletedKeys).toBe(1);
   });
 
