@@ -69,7 +69,7 @@ DB_POOL_TIMEOUT=30       # seconds to wait for a free connection before erroring
 | `DATA_RETENTION_LOG_DAYS`       | `30`                                | Log retention in days                                                    |
 | `DATA_RETENTION_ANALYTICS_DAYS` | `90`                                | Analytics retention in days                                              |
 | `DATA_RETENTION_MISSING_PATH_POLICY` | `warn`                         | What to do when a retention path is missing: `warn` \| `fail` \| `ignore` |
-| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`               | Fire an alert when missing-path count reaches this value in a single run |
+| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`               | Number of missing retention paths in a single pruning run that triggers an alert. Each run counts every configured log/analytics path that does not exist on disk; the counter resets at the start of every run. When the per-run count reaches this threshold, an alert is emitted. Only applies in `warn` mode — in `fail` mode the run aborts on the first missing path and in `ignore` mode missing paths are not counted, so the threshold has no effect. See `DATA_RETENTION_MISSING_PATH_POLICY` and the [retention pruning policy](./backend/docs/retention-pruning-policy.md) for details. |
 
 ### Social / third-party integrations (all optional)
 

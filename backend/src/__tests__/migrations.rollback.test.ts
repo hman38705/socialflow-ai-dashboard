@@ -355,6 +355,39 @@ describe('Migration Rollback', () => {
     });
   });
 
+  describe('rollback force guard', () => {
+    const MIGRATION = '20260324_sync_configured_queues';
+
+    it('refuses rollback without force and does not invoke the migration service', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+
+      expect(result.success).toBe(false);
+      expect(result.status).toBe(400);
+      expect(result.errorCode).toBe('FORCE_REQUIRED');
+      expect(result.error).toMatch(/force/i);
+
+      // Guard rejected before execution: migration remains applied and untouched
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+      expect(await redis.hexists(ADMIN_MIGRATIONS_METADATA_KEY, MIGRATION)).toBe(1);
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it('permits rollback when force is set', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger, { force: true });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe(200);
+      expect(result.errorCode).toBeUndefined();
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(0);
+    });
+  });
+
   describe('rollback error handling', () => {
     it('returns error when migration name does not exist', async () => {
       const result = await rollbackMigration('nonexistent_migration', mockLogger);
