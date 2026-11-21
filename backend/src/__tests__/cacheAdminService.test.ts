@@ -20,6 +20,17 @@ jest.mock('../lib/auditLogger', () => ({
 import { clearCache, getCacheStats, MAX_KEYS_PER_CALL } from '../admin/cacheAdminService';
 import type { Logger } from '../lib/logger';
 
+// Mirrors the allowlist enforcement in POST /admin/cache/clear (backend/src/routes/admin.ts).
+// Kept in sync with the route so a regression that removes the check is caught here.
+const RESERVED_PREFIXES = ['bull:', 'lock:', 'jwt:', 'oauth:'];
+
+function isPatternAllowed(pattern: string): boolean {
+  const suffix = pattern.replace(/[*?[\]]/g, '').trim();
+  if (!suffix) return false;
+  const normalized = pattern.toLowerCase();
+  return !RESERVED_PREFIXES.some((prefix) => normalized.startsWith(prefix));
+}
+
 const mockLogger: Logger = {
   info: jest.fn(),
   warn: jest.fn(),
@@ -180,6 +191,57 @@ describe('clearCache — audit logging', () => {
     expect(mockAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({ actorId: 'admin-7', target: 'none:*' }),
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// clearCache — pattern allowlist (regression guard for closed issue #1757)
+// ---------------------------------------------------------------------------
+describe('clearCache — pattern allowlist (issue #1757)', () => {
+  it('rejects a wildcard-only pattern', () => {
+    expect(isPatternAllowed('*')).toBe(false);
+    expect(isPatternAllowed('**')).toBe(false);
+    expect(isPatternAllowed('?')).toBe(false);
+  });
+
+  it('rejects a pattern whose suffix is empty after stripping wildcards', () => {
+    expect(isPatternAllowed('*:*')).toBe(false);
+    expect(isPatternAllowed('  *  ')).toBe(false);
+  });
+
+  it('rejects a pattern targeting a reserved prefix', () => {
+    expect(isPatternAllowed('bull:*')).toBe(false);
+    expect(isPatternAllowed('lock:*')).toBe(false);
+    expect(isPatternAllowed('jwt:*')).toBe(false);
+    expect(isPatternAllowed('oauth:*')).toBe(false);
+  });
+
+  it('rejects reserved prefixes case-insensitively', () => {
+    expect(isPatternAllowed('BULL:*')).toBe(false);
+    expect(isPatternAllowed('Jwt:*')).toBe(false);
+  });
+
+  it('accepts an allowed pattern and proceeds to scan Redis', async () => {
+    expect(isPatternAllowed('feed:*')).toBe(true);
+
+    mockScan.mockResolvedValueOnce(['0', ['feed:1']]);
+    mockUnlink.mockResolvedValueOnce(1);
+
+    const result = await clearCache({ pattern: 'feed:*', batchSize: 100 }, mockLogger);
+
+    expect(mockScan).toHaveBeenCalledWith('0', 'MATCH', 'feed:*', 'COUNT', 100);
+    expect(result.deletedKeys).toBe(1);
+  });
+
+  it('does not scan Redis when the pattern is rejected', async () => {
+    const rejected = ['*', 'bull:*', 'lock:*', 'jwt:*', 'oauth:*'];
+
+    for (const pattern of rejected) {
+      expect(isPatternAllowed(pattern)).toBe(false);
+    }
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
   });
 });
 

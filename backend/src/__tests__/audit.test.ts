@@ -254,25 +254,58 @@ describe('audit middleware', () => {
   });
 
   describe('admin config change audit', () => {
+    // Admin authentication fixture: an authenticated admin actor, mirroring the
+    // admin request setup used by the other admin tests in the suite.
+    function makeAdminReq(overrides: Partial<AuthRequest> = {}): AuthRequest {
+      return makeReq({
+        user: { id: 'admin-1', role: 'admin' } as any,
+        ...overrides,
+      });
+    }
+
     it('writes an audit entry capturing the changed key and acting admin on config PUT', () => {
       const mw = audit(
         'admin:config:update',
         'config',
-        undefined,
-        () => ({ key: 'maxUploadSize' }),
+        () => 'config-key-1',
+        () => ({ key: 'config-key-1' }),
       );
-      const req = makeReq({ user: { id: 'admin-42' } });
+      const req = makeAdminReq();
       const res = makeRes(200);
 
       mw(req, res as Response, jest.fn() as NextFunction);
       res.emit('finish');
 
       expect(mockLog).toHaveBeenCalledTimes(1);
-      expect(mockLog.mock.calls[0][0]).toMatchObject({
-        actorId: 'admin-42',
+      const logged = mockLog.mock.calls[0][0];
+      expect(logged).toMatchObject({
+        actorId: 'admin-1',
         action: 'admin:config:update',
         resourceType: 'config',
-        metadata: { key: 'maxUploadSize' },
+        resourceId: 'config-key-1',
+      });
+      expect(logged.metadata.key).toBe('config-key-1');
+    });
+
+    it('writes the audit entry on a successful 2xx response', () => {
+      const mw = audit(
+        'admin:config:update',
+        'config',
+        () => 'config-key-2',
+        () => ({ key: 'config-key-2' }),
+      );
+      const req = makeAdminReq();
+      const res = makeRes(204);
+
+      mw(req, res as Response, jest.fn() as NextFunction);
+      res.emit('finish');
+
+      expect(mockLog).toHaveBeenCalledTimes(1);
+      expect(mockLog.mock.calls[0][0]).toMatchObject({
+        actorId: 'admin-1',
+        action: 'admin:config:update',
+        resourceType: 'config',
+        resourceId: 'config-key-2',
       });
     });
 
@@ -280,11 +313,11 @@ describe('audit middleware', () => {
       const mw = audit(
         'admin:config:update',
         'config',
-        undefined,
-        () => ({ key: 'maxUploadSize' }),
+        () => 'config-key-3',
+        () => ({ key: 'config-key-3' }),
       );
-      const req = makeReq({ user: { id: 'admin-42' } });
-      const res = makeRes(400);
+      const req = makeAdminReq();
+      const res = makeRes(500);
 
       mw(req, res as Response, jest.fn() as NextFunction);
       res.emit('finish');
