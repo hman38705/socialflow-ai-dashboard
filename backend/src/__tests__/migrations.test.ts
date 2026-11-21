@@ -19,6 +19,7 @@ import {
 import { getRedisConnection } from '../config/runtime';
 import { AppError } from '../lib/errors';
 import { auditLogger } from '../services/AuditLogger';
+import { migrationFixtures } from './fixtures';
 
 jest.mock('../services/AuditLogger', () => ({
   auditLogger: {
@@ -785,6 +786,80 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
     });
   });
 
+  describe('Dry-Run Execution Short-Circuit', () => {
+    let app: Express;
+    let runMigrationsMock: jest.Mock;
+    let executeMigrationMock: jest.Mock;
+
+    const plannedMigrations = migrationFixtures.map((migration) => migration.name);
+
+    beforeEach(() => {
+      // The service stub records whether any migration body was executed.
+      executeMigrationMock = jest.fn();
+
+      runMigrationsMock = jest.fn().mockImplementation(async (flags: MigrationFlags) => {
+        // Mirror the service contract: dry runs report the plan but never
+        // invoke the migration execution path.
+        if (!flags.dryRun) {
+          for (const migration of migrationFixtures) {
+            executeMigrationMock(migration.name);
+          }
+        }
+
+        return {
+          executed: flags.dryRun ? [] : plannedMigrations,
+          skipped: [],
+          failed: [],
+          planned: plannedMigrations,
+          dryRun: flags.dryRun,
+          lockAcquired: true,
+        };
+      });
+
+      app = buildMigrationApp(runMigrationsMock);
+    });
+
+    it('should not execute any migration on a dryRun request', async () => {
+      await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: true })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenCalledTimes(1);
+      expect(runMigrationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ dryRun: true }),
+      );
+      expect(executeMigrationMock).not.toHaveBeenCalled();
+    });
+
+    it('should report planned migrations without applying them on dryRun', async () => {
+      const response = await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: true })
+        .expect(200);
+
+      expect(response.body.dryRun).toBe(true);
+      expect(response.body.planned).toEqual(plannedMigrations);
+      expect(response.body.executed).toEqual([]);
+      expect(executeMigrationMock).not.toHaveBeenCalled();
+    });
+
+    it('should not execute migrations when dryRun is combined with force', async () => {
+      const response = await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: true, force: true })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenCalledTimes(1);
+      expect(runMigrationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ dryRun: true, force: true }),
+      );
+      expect(response.body.dryRun).toBe(true);
+      expect(response.body.executed).toEqual([]);
+      expect(executeMigrationMock).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Audit Logging', () => {
     const actingAdmin = 'admin-user-123';
 
@@ -803,6 +878,46 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
           outcome: 'success',
         }),
       );
+    });
+
+    it('should write an audit entry for a forced migration run', async () => {
+      // Apply migrations so the guard precondition (intact checksums) holds
+      const initial = await runMigrations({ dryRun: false }, mockLogger);
+      expect(initial.executed.length).toBeGreaterThan(0);
+      mockAuditLog.mockClear();
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      const result = await runMigrations(
+        {
+          dryRun: false,
+          force: true,
+          name: firstMigrationName,
+          actor: actingAdmin,
+        } as any,
+        mockLogger,
+      );
+
+      expect(result.executed).toContain(firstMigrationName);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: actingAdmin,
+          action: 'migration.run',
+          metadata: expect.objectContaining({ force: true }),
+        }),
+      );
+    });
+
+    it('should not write an audit entry for a non-forced migration run', async () => {
+      const result = await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.executed.length).toBeGreaterThan(0);
+      expect(mockAuditLog).not.toHaveBeenCalled();
     });
 
     it('should write an audit entry when a migration run fails', async () => {

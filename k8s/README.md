@@ -13,6 +13,7 @@ k8s/
 │   ├── secret.yaml                # ExternalSecret CRD (pulls from AWS Secrets Manager)
 │   ├── cluster-secret-store.yaml  # ClusterSecretStore for ESO → AWS
 │   ├── prometheus-adapter-config.yaml  # Custom metric mapping for BullMQ queue depth
+│   ├── data-pruning-cronjob.yaml  # CronJob — prunes old data per retention policy
 │   └── kustomization.yaml
 └── overlays/
     ├── dev/    # 1 replica, relaxed resources, dev hostname, letsencrypt-staging TLS
@@ -106,6 +107,29 @@ helm install prometheus-adapter prometheus-community/prometheus-adapter \
   --set prometheus.port=9090 \
   -f k8s/base/prometheus-adapter-config.yaml
 ```
+
+## Data Pruning CronJob
+
+`base/data-pruning-cronjob.yaml` defines a CronJob that periodically prunes old
+data from the database according to the configured retention policy. Because the
+job is **destructive**, review the policy semantics in
+[`backend/docs/retention-pruning-policy.md`](../backend/docs/retention-pruning-policy.md)
+before changing any of the settings below.
+
+The retention behaviour is driven entirely by non-sensitive keys in
+`base/configmap.yaml`:
+
+| ConfigMap key | Purpose |
+| --- | --- |
+| `DATA_RETENTION_MODE` | Retention mode that selects how aggressively data is pruned |
+| `DATA_RETENTION_LOG_DAYS` | Number of days log records are retained |
+| `DATA_RETENTION_ANALYTICS_DAYS` | Number of days analytics records are retained |
+| `DATA_RETENTION_MISSING_PATH_POLICY` | Policy applied when a record's path is missing |
+| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | Threshold at which missing-path occurrences trigger an alert |
+
+To change the pruning behaviour, edit the relevant keys in
+`k8s/base/configmap.yaml` (or override them in an overlay) and re-apply the
+overlay. The variable names match those documented in the backend README.
 
 ## Image
 

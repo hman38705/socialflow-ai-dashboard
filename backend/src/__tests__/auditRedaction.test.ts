@@ -52,3 +52,55 @@ describe('redactSensitiveFields', () => {
     }
   });
 });
+
+describe('admin mutation audit payload redaction', () => {
+  it('redacts sensitive fields in an admin mutation audit payload', () => {
+    const payload = {
+      adminId: 'admin-1',
+      action: 'update-integration',
+      targetId: 'integration-42',
+      token: 'bearer-admin-secret',
+      password: 'admin-pass',
+      connectionString: 'postgres://user:pw@host:5432/db',
+    };
+    const stored = redactSensitiveFields(payload);
+    expect(stored['token']).toBe('[REDACTED]');
+    expect(stored['password']).toBe('[REDACTED]');
+    expect(stored['connectionString']).toBe('[REDACTED]');
+    const serialised = JSON.stringify(stored);
+    expect(serialised).not.toContain('bearer-admin-secret');
+    expect(serialised).not.toContain('admin-pass');
+    expect(serialised).not.toContain('postgres://user:pw@host:5432/db');
+  });
+
+  it('preserves non-sensitive admin fields unchanged', () => {
+    const payload = {
+      adminId: 'admin-1',
+      action: 'delete-user',
+      targetId: 'user-99',
+      reason: 'policy violation',
+    };
+    const stored = redactSensitiveFields(payload);
+    expect(stored).toEqual(payload);
+  });
+
+  it('redacts nested sensitive fields in an admin payload while keeping siblings', () => {
+    const payload = {
+      adminId: 'a1',
+      action: 'update-config',
+      config: {
+        credentials: { password: 'nested-secret', username: 'svc-account' },
+        endpoint: 'https://api.example.com',
+      },
+    };
+    const stored = redactSensitiveFields(payload);
+    expect(stored['adminId']).toBe('a1');
+    expect(stored['action']).toBe('update-config');
+    const config = stored['config'] as Record<string, unknown>;
+    expect(config['endpoint']).toBe('https://api.example.com');
+    const credentials = config['credentials'] as Record<string, unknown>;
+    expect(credentials['password']).toBe('[REDACTED]');
+    expect(credentials['username']).toBe('svc-account');
+    expect(JSON.stringify(stored)).not.toContain('nested-secret');
+  });
+});

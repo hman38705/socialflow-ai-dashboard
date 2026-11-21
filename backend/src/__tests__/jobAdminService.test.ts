@@ -127,8 +127,36 @@ describe('jobAdminService', () => {
         actor: 'admin-user',
         jobId: 'job-1',
         action: 'job.retry',
+        target: 'job-1',
+        resource: 'job-1',
       }),
     );
+  });
+
+  it('should not write an audit log entry when the retry fails validation', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: undefined, actor: 'admin-user' },
+        mockLogger,
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: '', actor: 'admin-user' },
+        mockLogger,
+      ),
+    ).rejects.toThrow();
+
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 123 as any, actor: 'admin-user' },
+        mockLogger,
+      ),
+    ).rejects.toThrow(TypeError);
+
+    expect(mockAuditLog).not.toHaveBeenCalled();
+    expect(QueueMock).not.toHaveBeenCalled();
   });
 
   it('should return dry-run results without retrying jobs', async () => {

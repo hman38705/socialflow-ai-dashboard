@@ -1,22 +1,33 @@
 # Data pruning CronJob.
 #
-# Missing-path policy & alerting
-# --------------------------------
-# The pruning job can encounter records whose referenced storage path no longer
-# exists. Two env vars control how those are handled and when operators are
-# alerted. Variable names match backend/src/config/config.ts exactly.
+# Retention policy & missing-path handling
+# ----------------------------------------
+# The pruning job deletes records that have exceeded their retention window.
+# The env vars below control the retention mode and how records whose
+# referenced storage path no longer exists are handled. Variable names match
+# backend/src/config/config.ts exactly, and the defaults below match the
+# DATA_RETENTION_* rows of the README variable table.
+#
+#   DATA_RETENTION_MODE
+#     - 'archive' : archive records past their retention window (default)
+#     - 'delete'  : permanently delete records past their retention window
 #
 #   DATA_RETENTION_MISSING_PATH_POLICY
-#     - 'skip'  : leave the record untouched and continue (default)
+#     - 'warn'  : log a warning and continue (default)
+#     - 'skip'  : leave the record untouched and continue
 #     - 'prune' : treat the missing path as prunable and remove the record
 #     - 'fail'  : abort the run so the drift is investigated
 #
 #   DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
 #     - number of missing-path records in a single run that triggers an alert
+#       (default 3)
 #
-# Both values are sourced from the configmap (see k8s/base/configmap.yaml) so
-# the active policy is visible from the manifest alone. For the full policy
-# semantics see backend/docs/retention-pruning-policy.md.
+# All three values are sourced from the backend-config ConfigMap (see
+# k8s/base/configmap.yaml) so the active policy is visible from the manifest
+# alone. Sensitive values (credentials, connection strings) live in the
+# socialflow-secrets Secret instead. For the full policy semantics see
+# backend/docs/retention-pruning-policy.md.
+=======
 apiVersion: batch/v1
 kind: CronJob
 metadata:
@@ -58,14 +69,25 @@ spec:
               env:
                 - name: DATA_PRUNING_ENABLED
                   value: "true"
-                # Missing-path policy — see backend/docs/retention-pruning-policy.md
+                # Retention mode (archive/delete, default archive) — sourced from
+                # the backend-config ConfigMap; see k8s/base/configmap.yaml and
+                # backend/docs/retention-pruning-policy.md
+                - name: DATA_RETENTION_MODE
+                  valueFrom:
+                    configMapKeyRef:
+                      name: backend-config
+                      key: DATA_RETENTION_MODE
+                      optional: true
+                # Missing-path policy (default warn) — sourced from the
+                # backend-config ConfigMap; see backend/docs/retention-pruning-policy.md
                 - name: DATA_RETENTION_MISSING_PATH_POLICY
                   valueFrom:
                     configMapKeyRef:
                       name: backend-config
                       key: DATA_RETENTION_MISSING_PATH_POLICY
                       optional: true
-                # Alert threshold for missing-path records per run
+                # Alert threshold for missing-path records per run (default 3) —
+                # sourced from the backend-config ConfigMap
                 - name: DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
                   valueFrom:
                     configMapKeyRef:
