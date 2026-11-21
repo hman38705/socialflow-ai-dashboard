@@ -9,6 +9,7 @@ import {
   RunMigrationsResult,
   MigrationMetadata,
 } from '../admin/migrationService';
+import { ErrorCode } from '../lib/errors';
 import {
   ADMIN_MIGRATIONS_SET_KEY,
   ADMIN_MIGRATIONS_LOCK_KEY,
@@ -16,6 +17,15 @@ import {
   MIGRATION_LOCK_TIMEOUT_MS,
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
+import { auditLogger } from '../services/AuditLogger';
+
+jest.mock('../services/AuditLogger', () => ({
+  auditLogger: {
+    log: jest.fn(),
+  },
+}));
+
+const mockAuditLog = auditLogger.log as jest.Mock;
 
 // ---------------------------------------------------------------------------
 // Route-level flag validation harness
@@ -92,6 +102,7 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
       error: jest.fn(),
       debug: jest.fn(),
     } as unknown as Logger;
+    mockAuditLog.mockClear();
   });
 
   afterEach(async () => {
@@ -439,6 +450,52 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
     });
   });
 
+  describe('Force Flag Guard', () => {
+    it('should reject force when the guard precondition is unmet', async () => {
+      // Apply migrations so metadata exists for the guard to inspect
+      await runMigrations({ dryRun: false }, mockLogger);
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      expect(Object.keys(metadata).length).toBeGreaterThan(0);
+
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      // Corrupt the stored checksum so the guard's precondition is unmet
+      const corrupted = JSON.parse(metadata[firstMigrationName]);
+      corrupted.checksum = 'corrupted-checksum-value';
+      await redis.hset(
+        ADMIN_MIGRATIONS_METADATA_KEY,
+        firstMigrationName,
+        JSON.stringify(corrupted),
+      );
+
+      // Force with an unmet precondition must be rejected via the central error shape
+      await expect(
+        runMigrations(
+          { dryRun: false, force: true, name: firstMigrationName },
+          mockLogger,
+        ),
+      ).rejects.toMatchObject({ code: ErrorCode.MIGRATION_FORCE_GUARD_FAILED });
+    });
+
+    it('should accept force when the guard precondition holds', async () => {
+      // Apply migrations so metadata exists and checksums are intact
+      const initial = await runMigrations({ dryRun: false }, mockLogger);
+      expect(initial.executed.length).toBeGreaterThan(0);
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      // Precondition holds (checksums intact) — force should proceed and re-execute
+      const result = await runMigrations(
+        { dryRun: false, force: true, name: firstMigrationName },
+        mockLogger,
+      );
+
+      expect(result.executed).toContain(firstMigrationName);
+    });
+  });
+
   describe('Dry-Run Safety', () => {
     it('should not persist state in dry-run mode', async () => {
       const appliedBefore = await redis.smembers(ADMIN_MIGRATIONS_SET_KEY);
@@ -664,6 +721,58 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
         dryRun: false,
         force: false,
       });
+    });
+  });
+
+  describe('Audit Logging', () => {
+    const actingAdmin = 'admin-user-123';
+
+    it('should write an audit entry on a successful migration run', async () => {
+      const result = await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.executed.length).toBeGreaterThan(0);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor: actingAdmin,
+          action: 'migration.run',
+          outcome: 'success',
+        }),
+      );
+    });
+
+    it('should write an audit entry when a migration run fails', async () => {
+      // Force a failure by corrupting metadata so checksum validation fails
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockAuditLog.mockClear();
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+      const corrupted = JSON.parse(metadata[firstMigrationName]);
+      corrupted.checksum = 'corrupted-checksum-value';
+      await redis.hset(
+        ADMIN_MIGRATIONS_METADATA_KEY,
+        firstMigrationName,
+        JSON.stringify(corrupted),
+      );
+
+      const result = await runMigrations(
+        { dryRun: false, name: firstMigrationName, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.failed).toContain(firstMigrationName);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor: actingAdmin,
+          action: 'migration.run',
+          outcome: 'failure',
+        }),
+      );
     });
   });
 

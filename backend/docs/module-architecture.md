@@ -96,6 +96,26 @@ modules/index.ts → registerModules()   ← TARGET (not yet mounted)
 
 ---
 
+## Realtime / SSE
+
+The realtime stream is served over Server-Sent Events (SSE). Because `EventSource` cannot send custom headers, clients cannot present a bearer token on the stream request itself. Instead the stream is authenticated with a short-lived, single-use **SSE ticket** that the client obtains over an authenticated HTTP call and then passes as a query parameter when opening the stream.
+
+### SSE ticket lifecycle
+
+Tickets are issued and redeemed by the ticket service used by the realtime stream (see the ticket service source for the exact TTL, sweep interval and cap constants).
+
+| Stage | Behaviour |
+|---|---|
+| Issuance | An authenticated request asks the ticket service for a ticket. The service generates an opaque ticket id, records it in an in-memory map with an expiry timestamp, and returns it to the client. |
+| Redemption | The stream endpoint redeems the ticket exactly once. A successful redemption removes the ticket from the map, so replaying the same ticket fails. |
+| TTL expiry | Each ticket carries a short TTL. A ticket that is not redeemed before its expiry is treated as invalid and cannot be redeemed. |
+| Periodic sweep | A timer periodically walks the map and drops expired tickets so unredeemed tickets do not accumulate. The sweep interval is `unref`'d, so it never keeps the process alive on its own. |
+| Size cap | The map is bounded by a maximum size. When the cap is reached, the oldest entries are evicted first (insertion order) to make room for new tickets. |
+
+Tickets are **per-process**: they live in an in-memory map on the instance that issued them. A ticket issued by one replica cannot be redeemed on another, so stream requests must be routed to the issuing instance (or the client must re-request a ticket). Sharing tickets across replicas via Redis is a separate distributed-state concern and is out of scope here.
+
+---
+
 ## Admin endpoint validation
 
 The admin routes (`src/admin/`) are the highest-privilege surface in the app. Their numeric guards live in `src/admin/constants.ts` and are enforced by the handlers in `cacheAdminService.ts`, `jobAdminService.ts`, and `migrationService.ts`. The rules below document current behaviour only — changing a bound requires updating this section and the executable spec.
@@ -187,3 +207,31 @@ Endpoints that do not yet emit audit entries are tracked by the audit logging is
 
 **Tests:**
 - Unit and integration tests go in `src/__tests__/`. Do not add new tests to `src/tests/`.
+
+---
+
+## Admin module
+
+Admin routes live in `src/routes/admin.ts` and are the highest-privilege surface in the API. Every admin route is mounted behind `authenticate` and `checkPermission`, and any route that accepts numeric input must also validate it before the handler runs.
+
+### Admin numeric input validation
+
+Numeric query and body inputs on admin routes — `limit`, `batchSize`, `dryRun`, and `force` — are validated with Zod schemas applied through the shared `validate(schema, target)` middleware in `src/shared/middleware/validate.ts` (the deprecated copy at `src/middleware/validate.ts` re-exports the same behaviour; import from `src/shared/` in new code).
+
+**Pipeline position.** The middleware sits after `authenticate` and `checkPermission` and before the route handler, so unauthenticated or unauthorised requests are rejected first and only well-formed numeric input reaches the handler:
+
+```
+authenticate → checkPermission → validate(schema, 'query' | 'body') → route handler
+```
+
+**Rejection response.** When validation fails the middleware short-circuits the request and responds with HTTP `422` and a JSON body of the form:
+
+```json
+{ "errors": [{ "field": "<dot.path>", "message": "<string>" }] }
+```
+
+`field` is the dot-separated path of the offending input (for example `query.limit`) and `message` is a human-readable description. This shape matches the assertions in `src/__tests__/validate.test.ts` and the `Error` schema in `openapi.yaml`.
+
+**Success behaviour.** On success the parsed and coerced value replaces `req.body` or `req.query` (whichever `target` was specified), so handlers can rely on numeric fields already being numbers rather than strings.
+
+When adding a new admin route, define a Zod schema for its numeric inputs and mount `validate(schema, target)` in the chain above — do not parse or coerce numeric inputs inside the handler.
