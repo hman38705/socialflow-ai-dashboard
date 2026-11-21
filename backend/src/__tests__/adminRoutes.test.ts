@@ -51,6 +51,11 @@ import {
 } from '../services/SSETicketService';
 import { logAuditEvent } from '../services/auditLogService';
 import { retryFailedJobs } from '../admin/jobAdminService';
+import { clearCache } from '../admin/cacheAdminService';
+import {
+  DEFAULT_ADMIN_LIMIT,
+  MAX_ADMIN_LIMIT,
+} from '../admin/constants';
 import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
 import { runMigrations, rollbackMigration } from '../admin/migrationService';
 import { ErrorCodes } from '../lib/errors';
@@ -125,6 +130,47 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin limit query parameter', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (retryFailedJobs as jest.Mock).mockClear();
+    (clearCache as jest.Mock).mockClear();
+  });
+
+  it('applies the documented default limit when limit is omitted', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+    expect(res.status).toBe(200);
+    expect(retryFailedJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: DEFAULT_ADMIN_LIMIT }),
+    );
+  });
+
+  it('clamps a limit above the upper bound to the maximum', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .query({ limit: MAX_ADMIN_LIMIT + 1000 })
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+    expect(res.status).toBe(200);
+    expect(retryFailedJobs).toHaveBeenCalledWith(
+      expect.objectContaining({ limit: MAX_ADMIN_LIMIT }),
+    );
+  });
+
+  it('rejects a non-numeric limit with 400', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .query({ limit: 'not-a-number' })
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+    expect(res.status).toBe(400);
+    expect(retryFailedJobs).not.toHaveBeenCalled();
   });
 });
 
