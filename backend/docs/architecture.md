@@ -85,7 +85,9 @@ Once all files are migrated, delete `src/routes/` and `src/routes/v1/index.ts`.
 
 The realtime stream issues short-lived single-use tickets before a client may
 open an SSE connection. Tickets are held in an in-memory map owned by
-`backend/src/services/SSETicketService.ts`.
+`backend/src/services/SSETicketService.ts`; see
+[SSE Ticket Service](#sse-ticket-service) for issuance, storage, TTL and the
+sweep.
 
 ### Ticket map cap and TTL sweep
 
@@ -116,7 +118,10 @@ sweep interval values.
 Server-Sent Events (SSE) connections are authenticated with short-lived,
 single-use tickets rather than long-lived bearer tokens. The realtime route
 (`routes/realtime.ts`, migrating to `modules/realtime/` — see the
-[Migration Plan](#migration-plan)) issues and redeems these tickets.
+[Migration Plan](#migration-plan)) issues and redeems these tickets. The
+service is implemented in `backend/src/services/SSETicketService.ts`; see
+[module-architecture.md](./module-architecture.md) for how it fits with the
+other backend services.
 
 ### Lifecycle
 
@@ -124,14 +129,14 @@ single-use tickets rather than long-lived bearer tokens. The realtime route
 client ──POST /realtime/ticket──▶ ticket service
                                    │ 1. generate 32 random bytes
                                    │ 2. hex-encode (64 chars)
-                                   │ 3. store in Redis: ticket -> userId
-                                   │    with a 30s TTL
+                                   │ 3. store in the in-process map:
+                                   │    ticket -> userId, with a 30s TTL
                                    ▼
 client ◀──ticket───────────────────┘
 
 client ──GET /realtime/stream?ticket=…──▶ ticket service
-                                          │ 4. atomic GETDEL on Redis
-                                          │ 5. valid  -> open SSE stream
+                                          │ 4. atomic lookup-and-delete
+                                          │ 5. valid   -> open SSE stream
                                           │    missing -> 401
                                           ▼
 ```
@@ -140,24 +145,43 @@ client ──GET /realtime/stream?ticket=…──▶ ticket service
 
 - The ticket is 32 cryptographically random bytes, hex-encoded to a 64-character
   string.
-- It is stored in Redis keyed by the ticket value, mapping to the authenticated
-  user, with a **30 second TTL**.
+- It is stored in an in-memory map keyed by the ticket value, mapping to the
+  authenticated user, with a **30 second TTL**.
 - Tickets are never logged or echoed back outside the issuance response.
 
 ### Redemption
 
-- Redemption uses an atomic `GETDEL`, so a ticket can be consumed exactly once
-  even under concurrent requests.
+- Redemption performs an atomic lookup-and-delete, so a ticket can be consumed
+  exactly once even under concurrent requests.
 - A missing or expired ticket yields `401`; the client must request a new one.
-- Because state lives in Redis rather than process memory, a ticket issued by
-  one replica can be redeemed by any other replica behind the load balancer.
 
 ### Bounds and sweeping
 
 - The ticket map is capped in size; when the cap is reached, issuance is
   rejected rather than growing unbounded.
-- Expired entries are removed by a periodic sweep that runs on the sweep
-  interval, in addition to Redis TTL expiry.
-- TTL and cap values are fixed here for reference only; see
-  `backend/docs/performance-budget.md` for the current numbers and their
-  rationale.
+- Expired entries are removed by a periodic sweep that runs on a fixed
+  interval. The sweep timer is `unref`'d so it does not keep the process alive.
+- The sweep interval is the bound on how long an expired ticket can linger in
+  the map, so the effective map size is the number of tickets issued within one
+  TTL window, capped as above.
+- See `backend/src/services/SSETicketService.ts` for the current cap, TTL and
+  sweep interval values.
+
+### Per-process limitation
+
+The ticket map lives in the memory of a single Node.js process. It is **not**
+shared between replicas and is not backed by Redis or any other external store.
+
+Consequences for multi-replica deployments:
+
+- A ticket issued by one replica can only be redeemed by that same replica. If
+  the SSE stream request is load-balanced to a different replica, redemption
+  fails with `401` and the client must request a new ticket.
+- Each replica enforces the size cap independently, so the aggregate number of
+  live tickets across the fleet is the cap multiplied by the replica count.
+- Each replica runs its own sweep, so expired tickets are reclaimed per process
+  rather than globally.
+
+Deployments that run more than one backend replica must therefore either pin
+ticket issuance and stream requests to the same replica (for example with
+sticky sessions) or move the ticket store to shared state.

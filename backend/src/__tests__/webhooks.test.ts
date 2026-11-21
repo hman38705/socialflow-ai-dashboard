@@ -192,6 +192,33 @@ describe('attemptDelivery', () => {
     expect(storedError).toBe(shortBody);
     expect(storedError.includes(TRUNCATION_MARKER)).toBe(false);
   });
+
+  it('cancels the response body reader once the truncation limit is reached', async () => {
+    const oversizedBody = 'x'.repeat(MAX_ERROR_LENGTH * 2);
+    const cancel = jest.fn().mockResolvedValue(undefined);
+    const reader = {
+      read: jest.fn().mockResolvedValue({ done: false, value: oversizedBody }),
+      cancel,
+      releaseLock: jest.fn(),
+    };
+    const stream = { getReader: () => reader } as unknown as ReadableStream<Uint8Array>;
+
+    mockFetch.mockResolvedValue({ ok: false, status: 500, body: stream });
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-1', url, secret, payload, 1);
+
+    expect(cancel).toHaveBeenCalledTimes(1);
+
+    const updateArg = mockUpdate.mock.calls[0][0] as {
+      data: { errorMessage: string };
+    };
+    const storedError = updateArg.data.errorMessage;
+
+    expect(storedError.length).toBe(MAX_ERROR_LENGTH + TRUNCATION_MARKER.length);
+    expect(storedError.length).toBeLessThan(oversizedBody.length);
+    expect(storedError.endsWith(TRUNCATION_MARKER)).toBe(true);
+  });
 });
 
 // ── retryPendingDeliveries — secret rotation ──────────────────────────────────
@@ -276,6 +303,33 @@ describe('webhookRetryJob error truncation', () => {
     const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
     expect(stored).toBe(shortError);
     expect(stored.endsWith(TRUNCATION_MARKER)).toBe(false);
+  });
+
+  it('truncates a long error body before persisting the delivery record', async () => {
+    const longErrorBody = 'x'.repeat(MAX_ERROR_MESSAGE_LENGTH + 500);
+    mockFetch.mockRejectedValue(new Error(longErrorBody));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-long-body', url, secret, payload, 1);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored.length).toBe(MAX_ERROR_MESSAGE_LENGTH + TRUNCATION_MARKER.length);
+    expect(stored.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(stored.length).toBeLessThan(longErrorBody.length);
+  });
+
+  it('persists a short error message verbatim with no truncation marker', async () => {
+    const shortError = 'ECONNREFUSED';
+    mockFetch.mockRejectedValue(new Error(shortError));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-short-body', url, secret, payload, 1);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored).toBe(shortError);
+    expect(stored.includes(TRUNCATION_MARKER)).toBe(false);
   });
 });
 

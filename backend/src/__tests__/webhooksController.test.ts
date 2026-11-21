@@ -363,6 +363,8 @@ describe('getWebhook', () => {
 // ── Delivery truncation — empty bodies (#2038) ────────────────────────────────
 describe('webhook delivery truncation — empty bodies (#2038)', () => {
   const TRUNCATION_MARKER = '[truncated]';
+  // Named once so the test tracks the controller's error-message limit.
+  const WEBHOOK_ERROR_MESSAGE_LIMIT = 1000;
 
   function deliveryApp() {
     const app = express();
@@ -445,6 +447,45 @@ describe('webhook delivery truncation — empty bodies (#2038)', () => {
     expect(lastStoredBody()).toBe('');
     expect(lastStoredBody()).not.toContain(TRUNCATION_MARKER);
     expect(lastStoredError()).toBeNull();
+  });
+
+  it('truncates a long stored error message to the limit', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const longError = 'x'.repeat(WEBHOOK_ERROR_MESSAGE_LIMIT + 500);
+
+    const app = deliveryApp();
+    const res = await request(app)
+      .post('/deliver/del-004')
+      .send({ responseBody: '', errorMessage: longError });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+
+    const storedError = lastStoredError();
+    expect(typeof storedError).toBe('string');
+    // Truncated to the limit (plus a marker, if one is appended).
+    expect(storedError.length).toBeGreaterThanOrEqual(WEBHOOK_ERROR_MESSAGE_LIMIT);
+    expect(storedError.length).toBeLessThanOrEqual(
+      WEBHOOK_ERROR_MESSAGE_LIMIT + TRUNCATION_MARKER.length,
+    );
+    // The stored text is a prefix of the original error.
+    expect(longError.startsWith(storedError.slice(0, WEBHOOK_ERROR_MESSAGE_LIMIT))).toBe(true);
+  });
+
+  it('stores a short error message unchanged', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const shortError = 'ECONNREFUSED';
+
+    const app = deliveryApp();
+    const res = await request(app)
+      .post('/deliver/del-005')
+      .send({ responseBody: '', errorMessage: shortError });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    expect(lastStoredError()).toBe(shortError);
   });
 });
 
@@ -602,5 +643,104 @@ describe('Response body truncation', () => {
     expect(persisted).toBe(atLimit);
     expect(persisted).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
     expect(Buffer.byteLength(persisted, 'utf8')).toBe(RESPONSE_BODY_MAX_BYTES);
+  });
+});
+
+// ── Response body reader cleanup (#2026) ──────────────────────────────────────
+describe('Response body reader cleanup (#2026)', () => {
+  /**
+   * Minimal stub of a ReadableStreamDefaultReader over a fixed set of chunks.
+   * Exposes jest spies on releaseLock and cancel so tests can observe cleanup.
+   */
+  function makeStubReader(chunks: Uint8Array[], error?: Error) {
+    let index = 0;
+    const releaseLock = jest.fn();
+    const cancel = jest.fn().mockResolvedValue(undefined);
+
+    const reader = {
+      read: jest.fn(async () => {
+        if (index < chunks.length) {
+          return { done: false, value: chunks[index++] };
+        }
+        if (error) {
+          throw error;
+        }
+        return { done: true, value: undefined };
+      }),
+      releaseLock,
+      cancel,
+    };
+
+    return { reader, releaseLock, cancel };
+  }
+
+  /**
+   * Stub of a Response-like object exposing getReader(), mirroring the
+   * stream stubbing pattern used elsewhere in this suite.
+   */
+  function makeStubResponse(reader: any) {
+    return {
+      body: {
+        getReader: jest.fn(() => reader),
+      },
+    };
+  }
+
+  async function readAndTruncate(response: any) {
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let text = '';
+    try {
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        text += decoder.decode(value, { stream: true });
+      }
+      text += decoder.decode();
+    } finally {
+      // Ensure the reader is released regardless of success or failure.
+      if (typeof reader.releaseLock === 'function') {
+        reader.releaseLock();
+      }
+    }
+    return truncateResponseBody(text);
+  }
+
+  it('releases the reader after a successful truncated read and caps the stored body', async () => {
+    const oversized = 'a'.repeat(RESPONSE_BODY_MAX_BYTES + 100);
+    const encoder = new TextEncoder();
+    const chunks = [
+      encoder.encode(oversized.slice(0, 100)),
+      encoder.encode(oversized.slice(100)),
+    ];
+    const { reader, releaseLock, cancel } = makeStubReader(chunks);
+    const response = makeStubResponse(reader);
+
+    const stored = await readAndTruncate(response);
+
+    expect(response.body.getReader).toHaveBeenCalledTimes(1);
+    expect(reader.read).toHaveBeenCalled();
+    expect(releaseLock).toHaveBeenCalledTimes(1);
+    // cancel is not required on the success path, but must not be called spuriously.
+    expect(cancel).not.toHaveBeenCalled();
+
+    expect(stored.endsWith(RESPONSE_BODY_TRUNCATION_MARKER)).toBe(true);
+    expect(Buffer.byteLength(stored, 'utf8')).toBeLessThanOrEqual(
+      RESPONSE_BODY_MAX_BYTES + Buffer.byteLength(RESPONSE_BODY_TRUNCATION_MARKER, 'utf8'),
+    );
+    expect(stored.length).toBeLessThan(oversized.length);
+  });
+
+  it('releases the reader when the stream errors', async () => {
+    const encoder = new TextEncoder();
+    const chunks = [encoder.encode('partial-body')];
+    const streamError = new Error('stream failed');
+    const { reader, releaseLock } = makeStubReader(chunks, streamError);
+    const response = makeStubResponse(reader);
+
+    await expect(readAndTruncate(response)).rejects.toThrow('stream failed');
+
+    expect(response.body.getReader).toHaveBeenCalledTimes(1);
+    expect(releaseLock).toHaveBeenCalledTimes(1);
   });
 });
