@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
+import { adminNumericSchema } from '../admin/constants';
 
 function makeReq(body?: unknown, query?: unknown, params?: unknown): Request {
   return {
@@ -183,6 +184,52 @@ describe('validate middleware', () => {
       mw(req, makeRes() as Response, next as NextFunction);
 
       expect(next).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('shared admin numeric schema (adminNumericSchema)', () => {
+    it('accepts a valid numeric value and coerces it to a number', () => {
+      const result = adminNumericSchema.safeParse('50');
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toBe(50);
+        expect(typeof result.data).toBe('number');
+      }
+    });
+
+    it('accepts a valid numeric value passed as a number', () => {
+      const result = adminNumericSchema.safeParse(50);
+
+      expect(result.success).toBe(true);
+      if (result.success) {
+        expect(result.data).toBe(50);
+      }
+    });
+
+    const invalidCases: { description: string; input: unknown }[] = [
+      { description: 'a non-numeric string', input: 'abc' },
+      { description: 'an empty string', input: '' },
+      { description: 'a negative value', input: '-1' },
+      { description: 'a value above the upper bound', input: '1000001' },
+    ];
+
+    it.each(invalidCases)('rejects $description', ({ input }) => {
+      const result = adminNumericSchema.safeParse(input);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a value above the upper bound passed as a number', () => {
+      const result = adminNumericSchema.safeParse(1000001);
+
+      expect(result.success).toBe(false);
+    });
+
+    it('rejects a negative value passed as a number', () => {
+      const result = adminNumericSchema.safeParse(-1);
+
+      expect(result.success).toBe(false);
     });
   });
 });
