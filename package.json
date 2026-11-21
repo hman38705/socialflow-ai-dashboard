@@ -100,7 +100,7 @@
     "@vitejs/plugin-react": "^6.1.2",
     "@vitest/ui": "^4.0.18",
     "autoprefixer": "^10.5.4",
-    "axe-core": "^4.13.0",
+    "axe-core": "^4.14.0",
     "concurrently": "^10.0.6",
     "electron": "^44.5.1",
     "electron-builder": "^26.8.1",
