@@ -50,6 +50,45 @@ describe('#1779 config', () => {
   });
 });
 
+describe('#1961 SSE ticket map capacity', () => {
+  beforeEach(() => {
+    jest.resetModules();
+    const { sseTicketService } = require('../services/SSETicketService');
+    sseTicketService.clear();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('rejects issuance with a clear error once the ticket map is at capacity', () => {
+    const { sseTicketService } = require('../services/SSETicketService');
+    const cap = sseTicketService.maxTickets;
+    expect(typeof cap).toBe('number');
+    expect(cap).toBeGreaterThan(0);
+
+    for (let i = 0; i < cap; i++) {
+      expect(() => sseTicketService.issue('user-' + i)).not.toThrow();
+    }
+    expect(sseTicketService.size).toBe(cap);
+
+    let error: unknown;
+    expect(() => {
+      try {
+        sseTicketService.issue('user-overflow');
+      } catch (e) {
+        error = e;
+        throw e;
+      }
+    }).toThrow();
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toMatch(/capacity|limit|full/i);
+    expect(sseTicketService.size).toBe(cap);
+  });
+});
+
 describe('#2046 SSE ticket sweep interval teardown', () => {
   afterEach(() => {
     jest.useRealTimers();
