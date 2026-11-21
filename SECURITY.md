@@ -61,3 +61,9 @@ Sensitive values are redacted before an audit entry is stored. Fields whose name
 ### Storage and Retention
 
 Audit entries are stored in the application database alongside other operational records. Retention and pruning of audit entries follow the policy described in [the retention and pruning policy](backend/docs/retention-pruning-policy.md); refer to that document for the authoritative retention windows and pruning behavior.
+
+## Resource Exhaustion Controls
+
+### SSE Ticket Map Cap and TTL Sweep
+
+The SSE ticket store is a bounded in-process structure. It enforces a maximum number of entries (`SSE_TICKET_MAP_CAP`) and expires tickets after a fixed TTL, with a periodic sweep removing expired entries. The default cap and TTL values are configured in the ticket service implementation at [`backend/src/services/SSETicketService.ts`](backend/src/services/SSETicketService.ts) (see also [`backend/src/services/sseTicketService.ts`](backend/src/services/sseTicketService.ts)). The sweep interval timer is unref'd, so it does not keep the process open.

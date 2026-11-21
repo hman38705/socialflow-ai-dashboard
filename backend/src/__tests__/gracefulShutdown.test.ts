@@ -147,6 +147,26 @@ describe('sseTicketService — sweep interval', () => {
       clearIntervalSpy.mockRestore();
     }
   });
+
+  it('clears the sweep interval exactly once on shutdown', async () => {
+    const handle = (sseTicketService as any).sweepInterval as NodeJS.Timeout | undefined;
+    expect(handle).toBeDefined();
+
+    const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
+
+    const exit = jest.fn();
+    await gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
+
+    // The sweep interval handle must be cleared exactly once during shutdown
+    const sweepClears = clearIntervalSpy.mock.calls.filter(([h]) => h === handle);
+    expect(sweepClears).toHaveLength(1);
+    expect(clearIntervalSpy).toHaveBeenCalledTimes(1);
+
+    // The timer handle is no longer referenced, so it cannot hold the loop open
+    expect(handle!.hasRef()).toBe(false);
+
+    clearIntervalSpy.mockRestore();
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════

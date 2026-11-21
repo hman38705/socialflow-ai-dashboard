@@ -183,43 +183,9 @@ describe('clearCache — key-pattern invalidation', () => {
 // clearCache — audit logging
 // ---------------------------------------------------------------------------
 describe('clearCache — audit logging', () => {
-  it('writes an audit log entry recording the acting admin and pattern', async () => {
-    mockScan.mockResolvedValueOnce(['0', ['audit:1', 'audit:2']]);
-    mockUnlink.mockResolvedValueOnce(2);
-
-    await clearCache(
-      { pattern: 'audit:*', batchSize: 100, actorId: 'admin-42' },
-      mockLogger,
-    );
-
-    expect(mockAuditLog).toHaveBeenCalledTimes(1);
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      expect.objectContaining({
-        actorId: 'admin-42',
-        action: 'cache.clear',
-        target: 'audit:*',
-      }),
-    );
-  });
-
-  it('does not write an audit entry when the audit call is removed', async () => {
-    mockScan.mockResolvedValueOnce(['0', []]);
-
-    await clearCache({ pattern: 'none:*', batchSize: 100, actorId: 'admin-7' }, mockLogger);
-
-    expect(mockAuditLog).toHaveBeenCalledWith(
-      expect.objectContaining({ actorId: 'admin-7', target: 'none:*' }),
-    );
-  });
-});
-
-// ---------------------------------------------------------------------------
-// clearCache — audit logging
-// ---------------------------------------------------------------------------
-describe('clearCache — audit logging', () => {
   const actingAdmin = 'admin-user-123';
 
-  it('writes an audit entry with the actor, pattern and deleted count', async () => {
+  it('writes an audit entry with the actor, action and cleared pattern', async () => {
     mockScan.mockResolvedValueOnce(['0', ['audit:1', 'audit:2']]);
     mockUnlink.mockResolvedValueOnce(2);
 

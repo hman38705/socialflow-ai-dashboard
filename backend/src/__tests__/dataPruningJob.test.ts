@@ -56,8 +56,9 @@ jest.mock('../config/runtime', () => ({
   getDataRetentionConfig: mockGetDataRetentionConfig,
 }));
 const mockLoggerWarn = jest.fn();
+const mockLoggerError = jest.fn();
 jest.mock('../lib/logger', () => ({
-  createLogger: () => ({ info: jest.fn(), warn: mockLoggerWarn, error: jest.fn() }),
+  createLogger: () => ({ info: jest.fn(), warn: mockLoggerWarn, error: mockLoggerError }),
 }));
 
 import { startDataPruningJob } from '../jobs/dataPruningJob';
@@ -214,6 +215,99 @@ describe('dataPruningJob — missing path policy: ignore', () => {
     // No pruning attempted for the missing path
     expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
     expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
+  });
+
+  it('skips the missing path silently, processes remaining paths, and emits no alert', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'ignore',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 2,
+      archivedFiles: 1,
+      scannedFiles: 6,
+      errors: [],
+      missingPaths: ['/logs/missing'],
+    });
+
+    await expect(capturedProcessor!()).resolves.toBeUndefined();
+
+    // No alert raised for the missing path in ignore mode
+    expect(mockSendAlert).not.toHaveBeenCalled();
+
+    // Remaining paths are still processed
+    expect(mockRunDataPruning).toHaveBeenCalledTimes(1);
+    expect(mockFilesPrunedInc).toHaveBeenCalledWith(2);
+    expect(mockFilesArchivedInc).toHaveBeenCalledWith(1);
+
+    // Ignore mode skips silently: no warning/error logged for the missing path
+    expect(mockLoggerWarn).not.toHaveBeenCalled();
+    expect(mockLoggerError).not.toHaveBeenCalled();
+  });
+});
+
+// ── missing-path policy: fail ─────────────────────────────────────────────────
+describe('dataPruningJob — missing path policy: fail', () => {
+  it('reports failure on the span when a retention path is missing', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs/missing'],
+    });
+
+    await capturedProcessor!();
+
+    // The job must not silently continue: the span is marked as failed.
+    expect(mockSpan.setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }), // SpanStatusCode.ERROR
+    );
+  });
+
+  it('rejects rather than silently continuing when runDataPruning reports a missing path', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    const missingPathError = new Error('retention path missing: /logs/missing');
+    mockRunDataPruning.mockRejectedValue(missingPathError);
+
+    await expect(capturedProcessor!()).rejects.toThrow('retention path missing');
+
+    expect(mockSpan.recordException).toHaveBeenCalledWith(missingPathError);
+    expect(mockSpan.setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }), // SpanStatusCode.ERROR
+    );
+  });
+
+  it('sends exactly one alert when the missing-path count reaches the threshold', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      missingPathAlertThreshold: 2,
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs', '/analytics'],
+    });
+
+    await capturedProcessor!();
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
   });
 });
 

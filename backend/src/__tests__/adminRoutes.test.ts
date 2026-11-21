@@ -213,6 +213,73 @@ function expectErrorShape(body: any) {
   expect(body.timestamp).toBeDefined();
 }
 
+describe('Admin config PUT', () => {
+  const mockRecordAudit = recordAudit as jest.Mock;
+  const mockLogAuditEvent = logAuditEvent as jest.Mock;
+
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    RoleStore.assign('editor-user', 'editor');
+    mockRecordAudit.mockClear();
+    mockLogAuditEvent.mockClear();
+  });
+
+  it('accepts a valid config payload and persists the change', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeGreaterThanOrEqual(200);
+    expect(res.status).toBeLessThan(300);
+
+    // The persisted change must be reflected in the response payload.
+    expect(JSON.stringify(res.body)).toContain('featureFlags.newDashboard');
+  });
+
+  it('rejects an invalid config payload with 400 and a field-level error', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ maxRetries: 'not-a-number' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.length).toBeGreaterThan(0);
+    for (const err of res.body.errors) {
+      expect(typeof err.field).toBe('string');
+      expect(typeof err.message).toBe('string');
+    }
+    expect(res.body.errors.some((e: any) => e.field === 'maxRetries')).toBe(true);
+  });
+
+  it('writes an audit record for an accepted config change', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeLessThan(400);
+
+    const auditMock = mockLogAuditEvent.mock.calls.length
+      ? mockLogAuditEvent
+      : mockRecordAudit;
+    expect(auditMock).toHaveBeenCalledTimes(1);
+
+    const entry = auditMock.mock.calls[0][0];
+    expect(entry).toEqual(
+      expect.objectContaining({
+        actorId: 'admin-user',
+        action: expect.stringMatching(/config/i),
+      }),
+    );
+    expect(
+      entry.resourceType ?? entry.target ?? entry.targetType,
+    ).toMatch(/config/i);
+    expect(entry.outcome ?? entry.result ?? 'success').toMatch(/success/i);
+  });
+});
+
 describe('Admin config PUT audit logging', () => {
   const mockRecordAudit = recordAudit as jest.Mock;
 
@@ -367,6 +434,75 @@ describe('Admin batchSize upper bound', () => {
 
     expect(res.status).not.toBe(400);
   });
+});
+
+describe('Admin batchSize boundary validation (#1997)', () => {
+  const MIN_BATCH_SIZE = 1;
+
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it.each([
+    { label: 'minimum', batchSize: MIN_BATCH_SIZE, accepted: true },
+    { label: 'maximum', batchSize: MAX_BATCH_SIZE, accepted: true },
+    { label: 'one below minimum', batchSize: MIN_BATCH_SIZE - 1, accepted: false },
+    { label: 'one above maximum', batchSize: MAX_BATCH_SIZE + 1, accepted: false },
+    { label: 'non-integer', batchSize: 1.5, accepted: false },
+    { label: 'non-numeric', batchSize: 'abc', accepted: false },
+  ])(
+    'handles $label batchSize ($batchSize) on POST /admin/jobs/retry',
+    async ({ batchSize, accepted }) => {
+      const res = await request(app)
+        .post('/admin/jobs/retry')
+        .set('x-test-user-id', 'admin-user')
+        .send({ batchSize });
+
+      if (accepted) {
+        expect(res.status).toBe(200);
+        expect(retryFailedJobs).toHaveBeenCalledTimes(1);
+        expect(retryFailedJobs).toHaveBeenCalledWith(
+          expect.objectContaining({ batchSize }),
+        );
+      } else {
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+        expect(retryFailedJobs).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
+    { label: 'minimum', batchSize: MIN_BATCH_SIZE, accepted: true },
+    { label: 'maximum', batchSize: MAX_BATCH_SIZE, accepted: true },
+    { label: 'one below minimum', batchSize: MIN_BATCH_SIZE - 1, accepted: false },
+    { label: 'one above maximum', batchSize: MAX_BATCH_SIZE + 1, accepted: false },
+    { label: 'non-integer', batchSize: 1.5, accepted: false },
+    { label: 'non-numeric', batchSize: 'abc', accepted: false },
+  ])(
+    'handles $label batchSize ($batchSize) on POST /admin/cache/clear',
+    async ({ batchSize, accepted }) => {
+      const res = await request(app)
+        .post('/admin/cache/clear')
+        .set('x-test-user-id', 'admin-user')
+        .send({ pattern: 'user:*', batchSize });
+
+      if (accepted) {
+        expect(res.status).toBe(200);
+        expect(clearCache).toHaveBeenCalledTimes(1);
+        expect(clearCache).toHaveBeenCalledWith(
+          expect.objectContaining({ batchSize }),
+        );
+      } else {
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+        expect(clearCache).not.toHaveBeenCalled();
+      }
+    },
+  );
 });
 
 describe('Admin limit default', () => {
@@ -524,6 +660,34 @@ describe('Admin force guard (#2061)', () => {
       .send({ force: true });
     expect(res.status).toBe(200);
     expect(migrationService.runMigrations).toHaveBeenCalled();
+  });
+});
+
+describe('Admin force confirmation guard (#1993)', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects POST /admin/migrations/run with force but no confirmation', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expectErrorShape(res.body);
+    // The guard must short-circuit before the destructive operation runs.
+    expect(migrationService.runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with POST /admin/migrations/run when force is confirmed', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect(migrationService.runMigrations).toHaveBeenCalledTimes(1);
   });
 });
 

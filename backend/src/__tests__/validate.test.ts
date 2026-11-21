@@ -232,4 +232,131 @@ describe('validate middleware', () => {
       expect(result.success).toBe(false);
     });
   });
+
+  describe('admin numeric fields (limit, batchSize, dryRun, force)', () => {
+    const numericFields = ['limit', 'batchSize'] as const;
+
+    const numericAccepted: { field: (typeof numericFields)[number]; input: unknown; expected: number }[] = [
+      { field: 'limit', input: '50', expected: 50 },
+      { field: 'limit', input: 50, expected: 50 },
+      { field: 'limit', input: '0', expected: 0 },
+      { field: 'limit', input: '1000000', expected: 1000000 },
+      { field: 'batchSize', input: '25', expected: 25 },
+      { field: 'batchSize', input: 25, expected: 25 },
+      { field: 'batchSize', input: '0', expected: 0 },
+      { field: 'batchSize', input: '1000000', expected: 1000000 },
+    ];
+
+    it.each(numericAccepted)(
+      'accepts $field=$input and coerces it to $expected',
+      ({ field, input, expected }) => {
+        const schema = z.object({ [field]: adminNumericSchema });
+        const result = schema.safeParse({ [field]: input });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect((result.data as Record<string, unknown>)[field]).toBe(expected);
+          expect(typeof (result.data as Record<string, unknown>)[field]).toBe('number');
+        }
+      }
+    );
+
+    const numericRejected: { field: (typeof numericFields)[number]; description: string; input: unknown }[] = [
+      { field: 'limit', description: 'a negative value', input: '-1' },
+      { field: 'limit', description: 'a negative number', input: -1 },
+      { field: 'limit', description: 'a value above the maximum', input: '1000001' },
+      { field: 'limit', description: 'a non-numeric string', input: 'abc' },
+      { field: 'limit', description: 'an empty string', input: '' },
+      { field: 'limit', description: 'a missing value', input: undefined },
+      { field: 'batchSize', description: 'a negative value', input: '-1' },
+      { field: 'batchSize', description: 'a negative number', input: -1 },
+      { field: 'batchSize', description: 'a value above the maximum', input: '1000001' },
+      { field: 'batchSize', description: 'a non-numeric string', input: 'abc' },
+      { field: 'batchSize', description: 'an empty string', input: '' },
+      { field: 'batchSize', description: 'a missing value', input: undefined },
+    ];
+
+    it.each(numericRejected)('rejects $field with $description', ({ field, input }) => {
+      const schema = z.object({ [field]: adminNumericSchema });
+      const result = schema.safeParse({ [field]: input });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(Array.isArray(result.error.errors)).toBe(true);
+        expect(result.error.errors.length).toBeGreaterThan(0);
+        expect(result.error.errors.some((e) => e.path[0] === field)).toBe(true);
+      }
+    });
+
+    const booleanFields = ['dryRun', 'force'] as const;
+
+    const booleanAccepted: { field: (typeof booleanFields)[number]; input: unknown; expected: boolean }[] = [
+      { field: 'dryRun', input: true, expected: true },
+      { field: 'dryRun', input: false, expected: false },
+      { field: 'dryRun', input: 'true', expected: true },
+      { field: 'dryRun', input: 'false', expected: false },
+      { field: 'force', input: true, expected: true },
+      { field: 'force', input: false, expected: false },
+      { field: 'force', input: 'true', expected: true },
+      { field: 'force', input: 'false', expected: false },
+    ];
+
+    it.each(booleanAccepted)(
+      'accepts $field=$input and coerces it to $expected',
+      ({ field, input, expected }) => {
+        const schema = z.object({ [field]: adminNumericSchema });
+        const result = schema.safeParse({ [field]: input });
+
+        expect(result.success).toBe(true);
+        if (result.success) {
+          expect((result.data as Record<string, unknown>)[field]).toBe(expected);
+          expect(typeof (result.data as Record<string, unknown>)[field]).toBe('boolean');
+        }
+      }
+    );
+
+    const booleanRejected: { field: (typeof booleanFields)[number]; description: string; input: unknown }[] = [
+      { field: 'dryRun', description: 'the string "yes"', input: 'yes' },
+      { field: 'dryRun', description: 'the string "no"', input: 'no' },
+      { field: 'dryRun', description: 'a numeric string', input: '1' },
+      { field: 'dryRun', description: 'a missing value', input: undefined },
+      { field: 'force', description: 'the string "yes"', input: 'yes' },
+      { field: 'force', description: 'the string "no"', input: 'no' },
+      { field: 'force', description: 'a numeric string', input: '1' },
+      { field: 'force', description: 'a missing value', input: undefined },
+    ];
+
+    it.each(booleanRejected)('rejects $field with $description', ({ field, input }) => {
+      const schema = z.object({ [field]: adminNumericSchema });
+      const result = schema.safeParse({ [field]: input });
+
+      expect(result.success).toBe(false);
+      if (!result.success) {
+        expect(Array.isArray(result.error.errors)).toBe(true);
+        expect(result.error.errors.length).toBeGreaterThan(0);
+        expect(result.error.errors.some((e) => e.path[0] === field)).toBe(true);
+      }
+    });
+
+    it('rejects "yes" for dryRun and force through the validate middleware with a 422 error shape', () => {
+      const schema = z.object({ dryRun: adminNumericSchema, force: adminNumericSchema });
+      const mw = validate(schema);
+      const req = makeReq({ dryRun: 'yes', force: 'yes' });
+      const res = makeRes();
+      const next = jest.fn();
+
+      mw(req, res as Response, next as NextFunction);
+
+      expect(next).not.toHaveBeenCalled();
+      expect(res.getStatus()).toBe(422);
+      const body = res.getBody() as { errors: { field: string; message: string }[] };
+      expect(Array.isArray(body.errors)).toBe(true);
+      expect(body.errors.some((e) => e.field === 'dryRun')).toBe(true);
+      expect(body.errors.some((e) => e.field === 'force')).toBe(true);
+      for (const err of body.errors) {
+        expect(typeof err.field).toBe('string');
+        expect(typeof err.message).toBe('string');
+      }
+    });
+  });
 });
