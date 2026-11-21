@@ -855,6 +855,46 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
       );
     });
 
+    it('should write an audit entry for a forced migration run', async () => {
+      // Apply migrations so the guard precondition (intact checksums) holds
+      const initial = await runMigrations({ dryRun: false }, mockLogger);
+      expect(initial.executed.length).toBeGreaterThan(0);
+      mockAuditLog.mockClear();
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+
+      const result = await runMigrations(
+        {
+          dryRun: false,
+          force: true,
+          name: firstMigrationName,
+          actor: actingAdmin,
+        } as any,
+        mockLogger,
+      );
+
+      expect(result.executed).toContain(firstMigrationName);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actorId: actingAdmin,
+          action: 'migration.run',
+          metadata: expect.objectContaining({ force: true }),
+        }),
+      );
+    });
+
+    it('should not write an audit entry for a non-forced migration run', async () => {
+      const result = await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.executed.length).toBeGreaterThan(0);
+      expect(mockAuditLog).not.toHaveBeenCalled();
+    });
+
     it('should write an audit entry when a migration run fails', async () => {
       // Force a failure by corrupting metadata so checksum validation fails
       await runMigrations({ dryRun: false }, mockLogger);

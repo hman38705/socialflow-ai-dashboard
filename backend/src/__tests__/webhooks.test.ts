@@ -304,6 +304,33 @@ describe('webhookRetryJob error truncation', () => {
     expect(stored).toBe(shortError);
     expect(stored.endsWith(TRUNCATION_MARKER)).toBe(false);
   });
+
+  it('truncates a long error body before persisting the delivery record', async () => {
+    const longErrorBody = 'x'.repeat(MAX_ERROR_MESSAGE_LENGTH + 500);
+    mockFetch.mockRejectedValue(new Error(longErrorBody));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-long-body', url, secret, payload, 1);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored.length).toBe(MAX_ERROR_MESSAGE_LENGTH + TRUNCATION_MARKER.length);
+    expect(stored.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(stored.length).toBeLessThan(longErrorBody.length);
+  });
+
+  it('persists a short error message verbatim with no truncation marker', async () => {
+    const shortError = 'ECONNREFUSED';
+    mockFetch.mockRejectedValue(new Error(shortError));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-short-body', url, secret, payload, 1);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored).toBe(shortError);
+    expect(stored.includes(TRUNCATION_MARKER)).toBe(false);
+  });
 });
 
 // ── startWebhookWorker — secret rotation ─────────────────────────────────────
