@@ -50,6 +50,32 @@ describe('#1779 config', () => {
   });
 });
 
+describe('SSE ticket validation', () => {
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('rejects a ticket id that was never issued', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    const unknownId = 'never-issued-ticket-id';
+    expect(sseTicketService.validateAndConsume(unknownId)).toBeNull();
+    // Still rejected on a second attempt: nothing was consumed or accepted.
+    expect(sseTicketService.validateAndConsume(unknownId)).toBeNull();
+  });
+
+  it('accepts a valid ticket exactly once and rejects reuse', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    const ticket = sseTicketService.generateTicket('user-1');
+    const ticketId = typeof ticket === 'string' ? ticket : ticket.id;
+
+    expect(sseTicketService.validateAndConsume(ticketId)).not.toBeNull();
+    expect(sseTicketService.validateAndConsume(ticketId)).toBeNull();
+  });
+});
+
 describe('#2030 SSE ticket map eviction order', () => {
   afterEach(() => {
     jest.useRealTimers();

@@ -2,6 +2,7 @@ import { Logger } from '../lib/logger';
 import { getDiscoveredQueueNames, retryFailedJobs } from '../admin/jobAdminService';
 import { getConfiguredQueueNames } from '../config/runtime';
 import { MIN_BATCH_SIZE, MAX_BATCH_SIZE } from '../admin/constants';
+import { ValidationError } from '../lib/errors';
 import { Queue } from 'bullmq';
 
 jest.mock('../config/runtime', () => ({
@@ -217,5 +218,79 @@ describe('jobAdminService', () => {
         mockLogger,
       ),
     ).rejects.toThrow(/batchSize/i);
+  });
+
+  it('should reject a batchSize of zero with a typed validation error', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: 0 },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject a negative batchSize with a typed validation error', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: -1 },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject a batchSize above the maximum with a typed validation error', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 10, dryRun: true, batchSize: MAX_BATCH_SIZE + 1 },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject a non-string job id with a typed validation error', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 123 as any },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject an empty job id with a typed validation error', async () => {
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: '' },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(QueueMock).not.toHaveBeenCalled();
+  });
+
+  it('should reject an unknown job id that resolves to no job', async () => {
+    const getJobMock = jest.fn().mockResolvedValue(undefined);
+    const closeMock = jest.fn().mockResolvedValue(undefined);
+    QueueMock.mockImplementation(() => ({
+      getJob: getJobMock,
+      close: closeMock,
+    }));
+
+    await expect(
+      retryFailedJobs(
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 'unknown-job' },
+        mockLogger,
+      ),
+    ).rejects.toBeInstanceOf(ValidationError);
+
+    expect(getJobMock).toHaveBeenCalledWith('unknown-job');
+    expect(closeMock).toHaveBeenCalled();
   });
 });

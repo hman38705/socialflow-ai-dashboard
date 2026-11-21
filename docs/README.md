@@ -19,6 +19,7 @@ Operational and architectural documentation for **SocialFlow AI Dashboard**.
 ## Operations
 
 - [Worker queue & job status reference](worker-queue-status.md)
+- [Data retention and pruning policy](../backend/docs/retention-pruning-policy.md)
 
 ## Fixes
 
