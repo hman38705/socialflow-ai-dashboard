@@ -15,6 +15,15 @@ import {
   MIGRATION_LOCK_TIMEOUT_MS,
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
+import { auditLogger } from '../services/AuditLogger';
+
+jest.mock('../services/AuditLogger', () => ({
+  auditLogger: {
+    log: jest.fn(),
+  },
+}));
+
+const mockAuditLog = auditLogger.log as jest.Mock;
 
 describe('Migration Service — Lock, Checksum & Idempotency', () => {
   let redis: Redis;
@@ -28,6 +37,7 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
       error: jest.fn(),
       debug: jest.fn(),
     } as unknown as Logger;
+    mockAuditLog.mockClear();
   });
 
   afterEach(async () => {
@@ -575,6 +585,58 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
       );
 
       expect(result.executed.length).toBe(0);
+    });
+  });
+
+  describe('Audit Logging', () => {
+    const actingAdmin = 'admin-user-123';
+
+    it('should write an audit entry on a successful migration run', async () => {
+      const result = await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.executed.length).toBeGreaterThan(0);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor: actingAdmin,
+          action: 'migration.run',
+          outcome: 'success',
+        }),
+      );
+    });
+
+    it('should write an audit entry when a migration run fails', async () => {
+      // Force a failure by corrupting metadata so checksum validation fails
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockAuditLog.mockClear();
+
+      const metadata = await redis.hgetall(ADMIN_MIGRATIONS_METADATA_KEY);
+      const firstMigrationName = Object.keys(metadata)[0];
+      const corrupted = JSON.parse(metadata[firstMigrationName]);
+      corrupted.checksum = 'corrupted-checksum-value';
+      await redis.hset(
+        ADMIN_MIGRATIONS_METADATA_KEY,
+        firstMigrationName,
+        JSON.stringify(corrupted),
+      );
+
+      const result = await runMigrations(
+        { dryRun: false, name: firstMigrationName, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(result.failed).toContain(firstMigrationName);
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      expect(mockAuditLog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          actor: actingAdmin,
+          action: 'migration.run',
+          outcome: 'failure',
+        }),
+      );
     });
   });
 

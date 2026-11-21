@@ -26,12 +26,19 @@ jest.mock('../admin/migrationService', () => ({
   rollbackMigration: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+// Mock the audit logger so we can assert on audit entries without a real store.
+jest.mock('../services/auditLog', () => ({
+  recordAudit: jest.fn().mockResolvedValue(undefined),
+}));
+
 // Mock the audit logger consistently with audit.test.ts so we can assert
 // that config mutations are recorded in the audit trail.
 jest.mock('../services/auditLogService', () => ({
   logAuditEvent: jest.fn().mockResolvedValue(undefined),
 }));
 
+import { recordAudit } from '../services/auditLog';
+import { redactSensitive } from '../utils/redaction';
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
 import { ErrorCodes } from '../constants/ErrorCodes';
@@ -160,10 +167,38 @@ function expectErrorShape(body: any) {
   expect(body.timestamp).toBeDefined();
 }
 
-describe('Admin config audit logging', () => {
+describe('Admin config PUT audit logging', () => {
+  const mockRecordAudit = recordAudit as jest.Mock;
+
   beforeEach(() => {
     RoleStore.assign('admin-user', 'admin');
+    RoleStore.assign('editor-user', 'editor');
+    mockRecordAudit.mockClear();
     (logAuditEvent as jest.Mock).mockClear();
+  });
+
+  it('writes an audit entry capturing the acting admin and changed keys on a successful config PUT', async () => {
+    const res = await request(mountedApp)
+      .put('/api/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ featureFlags: { beta: true }, maxRetries: 5 });
+
+    expect(res.status).toBe(200);
+    expect(mockRecordAudit).toHaveBeenCalledTimes(1);
+
+    const entry = mockRecordAudit.mock.calls[0][0];
+    expect(entry).toMatchObject({
+      actorId: 'admin-user',
+      action: expect.stringMatching(/config/i),
+    });
+    expect(entry.changedKeys ?? entry.keys).toEqual(
+      expect.arrayContaining(['featureFlags', 'maxRetries']),
+    );
+
+    // If the payload is inspected, ensure sensitive values are redacted.
+    if (entry.payload) {
+      expect(entry.payload).toEqual(redactSensitive(entry.payload));
+    }
   });
 
   it('writes an audit log entry capturing the changed key and acting admin on config PUT', async () => {
@@ -183,6 +218,16 @@ describe('Admin config audit logging', () => {
       }),
     );
     expect(JSON.stringify(entry)).toContain('featureFlags.newDashboard');
+  });
+
+  it('writes no audit entry when the config PUT is rejected', async () => {
+    const res = await request(mountedApp)
+      .put('/api/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ maxRetries: 'not-a-number' });
+
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(mockRecordAudit).not.toHaveBeenCalled();
   });
 });
 

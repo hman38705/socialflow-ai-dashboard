@@ -214,6 +214,44 @@ describe('clearCache — audit logging', () => {
 });
 
 // ---------------------------------------------------------------------------
+// clearCache — audit logging
+// ---------------------------------------------------------------------------
+describe('clearCache — audit logging', () => {
+  const actingAdmin = 'admin-user-123';
+
+  it('writes an audit entry with the actor, pattern and deleted count', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['audit:1', 'audit:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    await clearCache(
+      { pattern: 'audit:*', batchSize: 100, actor: actingAdmin },
+      mockLogger,
+    );
+
+    expect(mockAuditLog).toHaveBeenCalledTimes(1);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: actingAdmin,
+        action: 'cache.clear',
+        target: 'audit:*',
+        metadata: expect.objectContaining({ deletedKeys: 2 }),
+      }),
+    );
+  });
+
+  it('does not write an audit entry when the clear fails', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['fail:1']]);
+    mockUnlink.mockRejectedValueOnce(new Error('redis unlink failed'));
+
+    await expect(
+      clearCache({ pattern: 'fail:*', batchSize: 100, actor: actingAdmin }, mockLogger),
+    ).rejects.toThrow('redis unlink failed');
+
+    expect(mockAuditLog).not.toHaveBeenCalled();
+  });
+});
+
+// ---------------------------------------------------------------------------
 // clearCache — pattern allowlist (regression guard for closed issue #1757)
 // ---------------------------------------------------------------------------
 describe('clearCache — pattern allowlist (issue #1757)', () => {
