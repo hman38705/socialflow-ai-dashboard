@@ -5,6 +5,7 @@ import jwt from 'jsonwebtoken';
 import app from '../app';
 import { RoleStore } from '../models/Role';
 import { AuditLogStore } from '../models/AuditLog';
+import { configSchema } from '../config/config';
 
 const SECRET = 'test-secret';
 
@@ -61,6 +62,42 @@ describe('POST /api/v1/config/refresh — admin only', () => {
     expect(entry).toBeDefined();
     expect(entry?.action).toBe('org:settings:update');
     void before;
+  });
+});
+
+describe('SSE ticket TTL config', () => {
+  const ENV_KEY = 'SSE_TICKET_TTL_MS';
+  const original = process.env[ENV_KEY];
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env[ENV_KEY];
+    } else {
+      process.env[ENV_KEY] = original;
+    }
+  });
+
+  it('defaults to the documented TTL value', () => {
+    delete process.env[ENV_KEY];
+    const parsed = configSchema.parse({});
+    expect(parsed[ENV_KEY]).toBe(60_000);
+  });
+
+  it('parses an explicit override as a number', () => {
+    process.env[ENV_KEY] = '120000';
+    const parsed = configSchema.parse({});
+    expect(parsed[ENV_KEY]).toBe(120000);
+    expect(typeof parsed[ENV_KEY]).toBe('number');
+  });
+
+  it('fails validation for an invalid value and names the field', () => {
+    process.env[ENV_KEY] = 'not-a-number';
+    const result = configSchema.safeParse({});
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      const paths = result.error.issues.map((issue) => issue.path.join('.'));
+      expect(paths).toContain(ENV_KEY);
+    }
   });
 });
 

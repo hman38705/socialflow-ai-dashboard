@@ -10,6 +10,36 @@ import { parsePageLimit, toSkipTake, buildPageResponse } from '../utils/paginati
 
 const logger = createLogger('WebhooksController');
 
+// Maximum number of characters of a webhook response body that are stored
+// alongside a delivery record. Exported so tests can reference the limit
+// instead of hard-coding the number.
+export const WEBHOOK_RESPONSE_BODY_LIMIT = 1000;
+
+// Marker appended when a response body is truncated.
+export const WEBHOOK_RESPONSE_BODY_TRUNCATION_MARKER = '…[truncated]';
+
+/**
+ * Truncate a webhook response body to {@link WEBHOOK_RESPONSE_BODY_LIMIT}
+ * characters without splitting a surrogate pair (emoji, CJK, etc.).
+ *
+ * A naive `slice` can cut a UTF-16 surrogate pair in half and leave a lone
+ * surrogate in the stored text, which breaks JSON serialisation downstream.
+ * When truncation happens the marker is appended exactly once at the end.
+ */
+export function truncateResponseBody(body: string): string {
+  if (body.length <= WEBHOOK_RESPONSE_BODY_LIMIT) return body;
+
+  let end = WEBHOOK_RESPONSE_BODY_LIMIT;
+  // If the cut point lands between a high and low surrogate, back off by one
+  // so the pair is never split.
+  const code = body.charCodeAt(end - 1);
+  if (code >= 0xd800 && code <= 0xdbff) {
+    end -= 1;
+  }
+
+  return body.slice(0, end) + WEBHOOK_RESPONSE_BODY_TRUNCATION_MARKER;
+}
+
 // ── List subscriptions ────────────────────────────────────────────────────────
 export async function listWebhooks(req: AuthRequest, res: Response, next: NextFunction) {
   try {
