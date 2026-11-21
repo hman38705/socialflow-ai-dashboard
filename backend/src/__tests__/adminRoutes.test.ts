@@ -369,6 +369,75 @@ describe('Admin batchSize upper bound', () => {
   });
 });
 
+describe('Admin batchSize boundary validation (#1997)', () => {
+  const MIN_BATCH_SIZE = 1;
+
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it.each([
+    { label: 'minimum', batchSize: MIN_BATCH_SIZE, accepted: true },
+    { label: 'maximum', batchSize: MAX_BATCH_SIZE, accepted: true },
+    { label: 'one below minimum', batchSize: MIN_BATCH_SIZE - 1, accepted: false },
+    { label: 'one above maximum', batchSize: MAX_BATCH_SIZE + 1, accepted: false },
+    { label: 'non-integer', batchSize: 1.5, accepted: false },
+    { label: 'non-numeric', batchSize: 'abc', accepted: false },
+  ])(
+    'handles $label batchSize ($batchSize) on POST /admin/jobs/retry',
+    async ({ batchSize, accepted }) => {
+      const res = await request(app)
+        .post('/admin/jobs/retry')
+        .set('x-test-user-id', 'admin-user')
+        .send({ batchSize });
+
+      if (accepted) {
+        expect(res.status).toBe(200);
+        expect(retryFailedJobs).toHaveBeenCalledTimes(1);
+        expect(retryFailedJobs).toHaveBeenCalledWith(
+          expect.objectContaining({ batchSize }),
+        );
+      } else {
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+        expect(retryFailedJobs).not.toHaveBeenCalled();
+      }
+    },
+  );
+
+  it.each([
+    { label: 'minimum', batchSize: MIN_BATCH_SIZE, accepted: true },
+    { label: 'maximum', batchSize: MAX_BATCH_SIZE, accepted: true },
+    { label: 'one below minimum', batchSize: MIN_BATCH_SIZE - 1, accepted: false },
+    { label: 'one above maximum', batchSize: MAX_BATCH_SIZE + 1, accepted: false },
+    { label: 'non-integer', batchSize: 1.5, accepted: false },
+    { label: 'non-numeric', batchSize: 'abc', accepted: false },
+  ])(
+    'handles $label batchSize ($batchSize) on POST /admin/cache/clear',
+    async ({ batchSize, accepted }) => {
+      const res = await request(app)
+        .post('/admin/cache/clear')
+        .set('x-test-user-id', 'admin-user')
+        .send({ pattern: 'user:*', batchSize });
+
+      if (accepted) {
+        expect(res.status).toBe(200);
+        expect(clearCache).toHaveBeenCalledTimes(1);
+        expect(clearCache).toHaveBeenCalledWith(
+          expect.objectContaining({ batchSize }),
+        );
+      } else {
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+        expect(clearCache).not.toHaveBeenCalled();
+      }
+    },
+  );
+});
+
 describe('Admin limit default', () => {
   beforeEach(() => {
     RoleStore.assign('admin-user', 'admin');
