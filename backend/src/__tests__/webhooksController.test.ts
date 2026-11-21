@@ -362,6 +362,8 @@ describe('getWebhook', () => {
 // ── Delivery truncation — empty bodies (#2038) ────────────────────────────────
 describe('webhook delivery truncation — empty bodies (#2038)', () => {
   const TRUNCATION_MARKER = '[truncated]';
+  // Named once so the test tracks the controller's error-message limit.
+  const WEBHOOK_ERROR_MESSAGE_LIMIT = 1000;
 
   function deliveryApp() {
     const app = express();
@@ -444,6 +446,45 @@ describe('webhook delivery truncation — empty bodies (#2038)', () => {
     expect(lastStoredBody()).toBe('');
     expect(lastStoredBody()).not.toContain(TRUNCATION_MARKER);
     expect(lastStoredError()).toBeNull();
+  });
+
+  it('truncates a long stored error message to the limit', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const longError = 'x'.repeat(WEBHOOK_ERROR_MESSAGE_LIMIT + 500);
+
+    const app = deliveryApp();
+    const res = await request(app)
+      .post('/deliver/del-004')
+      .send({ responseBody: '', errorMessage: longError });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+
+    const storedError = lastStoredError();
+    expect(typeof storedError).toBe('string');
+    // Truncated to the limit (plus a marker, if one is appended).
+    expect(storedError.length).toBeGreaterThanOrEqual(WEBHOOK_ERROR_MESSAGE_LIMIT);
+    expect(storedError.length).toBeLessThanOrEqual(
+      WEBHOOK_ERROR_MESSAGE_LIMIT + TRUNCATION_MARKER.length,
+    );
+    // The stored text is a prefix of the original error.
+    expect(longError.startsWith(storedError.slice(0, WEBHOOK_ERROR_MESSAGE_LIMIT))).toBe(true);
+  });
+
+  it('stores a short error message unchanged', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const shortError = 'ECONNREFUSED';
+
+    const app = deliveryApp();
+    const res = await request(app)
+      .post('/deliver/del-005')
+      .send({ responseBody: '', errorMessage: shortError });
+
+    expect(res.status).toBe(200);
+    expect(mockPrisma.webhookDelivery.update).toHaveBeenCalledTimes(1);
+    expect(lastStoredError()).toBe(shortError);
   });
 });
 
