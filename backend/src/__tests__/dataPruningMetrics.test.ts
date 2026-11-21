@@ -133,13 +133,24 @@ describe('data pruning job metrics', () => {
       return runDataPruning();
     };
 
-    it('does not alert below the threshold and alerts exactly once at it', async () => {
+    it('does not alert below the threshold', async () => {
       process.env.DATA_RETENTION_POLICY = 'warn';
 
       await runWithMissingPaths(threshold - 1);
       expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('alerts exactly once at the threshold', async () => {
+      process.env.DATA_RETENTION_POLICY = 'warn';
 
       await runWithMissingPaths(threshold);
+      expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+    });
+
+    it('alerts above the threshold', async () => {
+      process.env.DATA_RETENTION_POLICY = 'warn';
+
+      await runWithMissingPaths(threshold + 1);
       expect(mockLogger.warn).toHaveBeenCalledTimes(1);
     });
 

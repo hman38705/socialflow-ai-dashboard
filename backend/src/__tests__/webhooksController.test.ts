@@ -56,8 +56,11 @@ import {
   truncateResponseBody,
   RESPONSE_BODY_MAX_BYTES,
   RESPONSE_BODY_TRUNCATION_MARKER,
+  WEBHOOK_RESPONSE_BODY_LIMIT,
+  WEBHOOK_RESPONSE_BODY_TRUNCATION_MARKER,
 } from '../controllers/webhooks';
 import { rawBodyMiddleware, verifySignature } from '../middleware/verifySignature';
+import { createMultibyteBody, hasLoneSurrogate } from './fixtures';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const USER_ID = 'user-abc';
@@ -561,5 +564,42 @@ describe('Response body truncation', () => {
 
     expect(stored).toBe(short);
     expect(stored).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
+  });
+});
+
+// ── Multibyte-safe truncation (#2016) ─────────────────────────────────────────
+describe('Response body truncation — multibyte safety (#2016)', () => {
+  const marker = WEBHOOK_RESPONSE_BODY_TRUNCATION_MARKER;
+  const markerBytes = Buffer.byteLength(marker, 'utf8');
+
+  it('truncates a multibyte body without splitting surrogate pairs', () => {
+    const body = createMultibyteBody(WEBHOOK_RESPONSE_BODY_LIMIT + 500);
+    expect(Buffer.byteLength(body, 'utf8')).toBeGreaterThan(WEBHOOK_RESPONSE_BODY_LIMIT);
+
+    const stored = truncateResponseBody(body);
+
+    // Respects the documented length bound (limit plus marker).
+    expect(Buffer.byteLength(stored, 'utf8')).toBeLessThanOrEqual(
+      WEBHOOK_RESPONSE_BODY_LIMIT + markerBytes,
+    );
+    // No lone surrogates persisted.
+    expect(hasLoneSurrogate(stored)).toBe(false);
+    // Valid UTF-8 text — no replacement characters from broken byte sequences.
+    expect(stored).not.toContain('\uFFFD');
+    expect(Buffer.from(stored, 'utf8').toString('utf8')).toBe(stored);
+    // Marker appended exactly once, at the end.
+    expect(stored.endsWith(marker)).toBe(true);
+    expect(stored.split(marker)).toHaveLength(2);
+  });
+
+  it('returns a multibyte body at or under the limit unchanged with no marker', () => {
+    const body = createMultibyteBody(WEBHOOK_RESPONSE_BODY_LIMIT);
+    expect(Buffer.byteLength(body, 'utf8')).toBeLessThanOrEqual(WEBHOOK_RESPONSE_BODY_LIMIT);
+
+    const stored = truncateResponseBody(body);
+
+    expect(stored).toBe(body);
+    expect(stored).not.toContain(marker);
+    expect(hasLoneSurrogate(stored)).toBe(false);
   });
 });
