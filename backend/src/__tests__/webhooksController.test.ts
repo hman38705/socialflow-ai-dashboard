@@ -58,6 +58,7 @@ import {
   RESPONSE_BODY_TRUNCATION_MARKER,
 } from '../controllers/webhooks';
 import { rawBodyMiddleware, verifySignature } from '../middleware/verifySignature';
+import { createMultibyteBody } from './fixtures';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const USER_ID = 'user-abc';
@@ -561,5 +562,45 @@ describe('Response body truncation', () => {
 
     expect(stored).toBe(short);
     expect(stored).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
+  });
+
+  it('truncates an oversized delivery response body and stores it with the marker', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const oversized = createMultibyteBody(RESPONSE_BODY_MAX_BYTES + 500);
+    const stored = truncateResponseBody(oversized);
+
+    await mockPrisma.webhookDelivery.update({
+      where: { id: 'del-oversized' },
+      data: { status: 'SUCCESS', responseBody: stored, errorMessage: null },
+    });
+
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    const persisted = calls[calls.length - 1][0].data.responseBody as string;
+
+    expect(persisted.endsWith(RESPONSE_BODY_TRUNCATION_MARKER)).toBe(true);
+    expect(Buffer.byteLength(persisted, 'utf8')).toBeLessThanOrEqual(
+      RESPONSE_BODY_MAX_BYTES + Buffer.byteLength(RESPONSE_BODY_TRUNCATION_MARKER, 'utf8'),
+    );
+    expect(persisted.length).toBeLessThan(oversized.length);
+  });
+
+  it('stores a delivery response body exactly at the limit unchanged', async () => {
+    mockPrisma.webhookDelivery.update.mockResolvedValue({});
+
+    const atLimit = 'a'.repeat(RESPONSE_BODY_MAX_BYTES);
+    const stored = truncateResponseBody(atLimit);
+
+    await mockPrisma.webhookDelivery.update({
+      where: { id: 'del-at-limit' },
+      data: { status: 'SUCCESS', responseBody: stored, errorMessage: null },
+    });
+
+    const calls = mockPrisma.webhookDelivery.update.mock.calls;
+    const persisted = calls[calls.length - 1][0].data.responseBody as string;
+
+    expect(persisted).toBe(atLimit);
+    expect(persisted).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
+    expect(Buffer.byteLength(persisted, 'utf8')).toBe(RESPONSE_BODY_MAX_BYTES);
   });
 });
