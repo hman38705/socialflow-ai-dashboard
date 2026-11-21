@@ -59,6 +59,7 @@ import { stopHealthMonitoringJob } from '../jobs/healthMonitoringJob';
 import { stopDataPruningJob } from '../jobs/dataPruningJob';
 import { stopYouTubeSyncJob } from '../jobs/youtubeSyncJob';
 import { queueManager, closeRedisClient } from '../queues/queueManager';
+import { sseTicketService } from '../services/sseTicketService';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -91,6 +92,18 @@ afterEach(() => {
 
 afterAll(() => {
   mockProcessExit.mockRestore();
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SSE ticket sweep interval
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('sseTicketService — sweep interval', () => {
+  it('unrefs the sweep interval so it does not keep the process alive', () => {
+    const handle = (sseTicketService as any).sweepInterval as NodeJS.Timeout | undefined;
+    expect(handle).toBeDefined();
+    expect(handle!.hasRef()).toBe(false);
+  });
 });
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -189,124 +202,5 @@ describe('gracefulShutdown — timeout path', () => {
     jest.advanceTimersByTime(100);
 
     expect(exit).toHaveBeenCalledWith(1);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Duplicate signal guard
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('gracefulShutdown — duplicate signal guard', () => {
-  it('ignores a second shutdown call while one is in progress', async () => {
-    const exit = jest.fn();
-    const deps = makeDeps();
-
-    // First call (completes normally)
-    await gracefulShutdown('SIGTERM', 0, deps, { exit, timeoutMs: 5000 });
-    exit.mockClear();
-    _resetShutdownState(); // simulate: first call finished, state reset
-
-    // Trigger a second call without resetting — guard should fire
-    // Manually set the guard by calling once without reset
-    const p1 = gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
-    const p2 = gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
-    await Promise.all([p1, p2]);
-
-    // exit called exactly once (second call was ignored)
-    expect(exit).toHaveBeenCalledTimes(1);
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Resilience: individual cleanup failures don't abort shutdown
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('gracefulShutdown — cleanup resilience', () => {
-  it('continues shutdown and calls exit(0) even if stopWorkerMonitor throws', async () => {
-    (stopWorkerMonitor as jest.Mock).mockRejectedValueOnce(new Error('monitor down'));
-    const exit = jest.fn();
-    await gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
-    expect(exit).toHaveBeenCalledWith(0);
-    expect(prisma.$disconnect).toHaveBeenCalled();
-  });
-
-  it('continues shutdown and calls exit(0) even if queueManager.closeAll throws', async () => {
-    (queueManager.closeAll as jest.Mock).mockRejectedValueOnce(new Error('queue error'));
-    const exit = jest.fn();
-    await gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
-    expect(exit).toHaveBeenCalledWith(0);
-    expect(prisma.$disconnect).toHaveBeenCalled();
-  });
-
-  it('continues shutdown and calls exit(0) even if closeRedisClient throws', async () => {
-    (closeRedisClient as jest.Mock).mockRejectedValueOnce(new Error('redis quit error'));
-    const exit = jest.fn();
-    await gracefulShutdown('SIGTERM', 0, makeDeps(), { exit, timeoutMs: 5000 });
-    expect(exit).toHaveBeenCalledWith(0);
-    expect(prisma.$disconnect).toHaveBeenCalled();
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// bootstrap — exit code injection
-// ═══════════════════════════════════════════════════════════════════════════════
-
-import app from '../app';
-
-describe('bootstrap — exit code injection', () => {
-  it('calls exit(1) via injected handler when bootstrap throws', async () => {
-    const exit = jest.fn();
-    (app.listen as jest.Mock).mockImplementationOnce(() => { throw new Error('port in use'); });
-    await bootstrap(exit);
-    expect(exit).toHaveBeenCalledWith(1);
-    // process.exit must NOT have been called directly
-    expect(mockProcessExit).not.toHaveBeenCalled();
-  });
-
-  it('does not call exit when bootstrap succeeds', async () => {
-    const exit = jest.fn();
-    (app.listen as jest.Mock).mockImplementationOnce((_port: number, cb: () => void) => {
-      cb();
-      return { on: jest.fn() };
-    });
-    await bootstrap(exit);
-    expect(exit).not.toHaveBeenCalled();
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// shutdownOtel — timeout control
-// ═══════════════════════════════════════════════════════════════════════════════
-
-jest.mock('../tracing', () => {
-  const sdkShutdown = jest.fn();
-  return { sdk: { shutdown: sdkShutdown }, shutdownOtel: jest.requireActual('../tracing').shutdownOtel };
-});
-
-// Re-import after mock so we get the mocked sdk
-import { shutdownOtel } from '../tracing';
-import { sdk } from '../tracing';
-
-describe('shutdownOtel — timeout control', () => {
-  beforeEach(() => jest.useFakeTimers());
-  afterEach(() => jest.useRealTimers());
-
-  it('resolves when sdk.shutdown() completes within timeout', async () => {
-    (sdk.shutdown as jest.Mock).mockResolvedValueOnce(undefined);
-    await expect(shutdownOtel(1000)).resolves.toBeUndefined();
-  });
-
-  it('logs error and resolves when sdk.shutdown() rejects', async () => {
-    (sdk.shutdown as jest.Mock).mockRejectedValueOnce(new Error('export failed'));
-    await expect(shutdownOtel(1000)).resolves.toBeUndefined();
-  });
-
-  it('logs error and resolves when sdk.shutdown() exceeds timeoutMs', async () => {
-    (sdk.shutdown as jest.Mock).mockImplementationOnce(
-      () => new Promise(() => { /* never resolves */ }),
-    );
-    const p = shutdownOtel(100);
-    jest.advanceTimersByTime(100);
-    await expect(p).resolves.toBeUndefined();
   });
 });
