@@ -150,32 +150,34 @@ The HTTP contract (request/response shapes and error codes) is described in `ope
 
 ---
 
-## Admin audit log fields
+## Audit log
 
-Admin mutations write structured audit entries through the shared audit middleware (`src/shared/middleware/audit.ts`). The field schema below is the reference for new admin endpoints and for reviewers verifying completeness. It is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.
+Admin mutations are recorded in the `AuditLog` model defined in [`backend/prisma/schema.prisma`](../prisma/schema.prisma). This section documents the persisted schema, the write path, and which admin mutations are recorded. Retention and pruning are out of scope here.
 
-### Recorded fields
+### Model fields
 
-| Field | Description |
-|---|---|
-| `actorId` | ID of the authenticated user performing the mutation |
-| `actorEmail` | Email of the acting user (redacted where required) |
-| `actorRole` | Role of the acting user at the time of the action |
-| `action` | Stable action identifier (e.g. `admin.cache.clear`, `admin.job.retry`) |
-| `targetType` | Type of the resource acted on (e.g. `cache`, `job`, `migration`, `config`) |
-| `targetId` | Identifier of the affected resource, when applicable |
-| `method` | HTTP method of the originating request |
-| `path` | Request path of the originating request |
-| `statusCode` | Response status code returned to the caller |
-| `ip` | Client IP address of the request |
-| `userAgent` | Client user agent of the request |
-| `requestId` | Correlation ID propagated from the request middleware |
-| `metadata` | Action-specific details (redacted per `auditRedaction.test.ts`) |
-| `createdAt` | Timestamp when the audit entry was written |
+The `AuditLog` model ([Prisma definition](../prisma/schema.prisma)) has the following fields:
+
+| Field | Type | Description |
+|---|---|---|
+| `id` | `String` | Primary key of the audit entry |
+| `userId` | `String?` | ID of the authenticated user performing the mutation |
+| `action` | `String` | Stable action identifier (e.g. `admin.cache.clear`, `admin.job.retry`) |
+| `organizationId` | `String?` | Organization the action was performed within, when applicable |
+| `resource` | `String` | Type of the resource acted on (e.g. `cache`, `job`, `migration`, `config`) |
+| `resourceId` | `String?` | Identifier of the affected resource, when applicable |
+| `metadata` | `Json?` | Action-specific details (redacted before persistence) |
+| `ipAddress` | `String?` | Client IP address of the originating request |
+| `userAgent` | `String?` | Client user agent of the originating request |
+| `createdAt` | `DateTime` | Timestamp when the audit entry was written |
 
 Sensitive values inside `metadata` (tokens, secrets, credentials) are redacted before persistence; see `src/__tests__/auditRedaction.test.ts` for the redaction contract.
 
-### Covered admin actions
+### Write path
+
+Audit entries are written through the shared audit middleware in `src/shared/middleware/audit.ts`, which delegates persistence to the audit log service. The middleware captures the acting user, the action, the target resource, and request context (IP address, user agent) and hands them to the service, which writes a single `AuditLog` row. The write path is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.
+
+### Recorded admin mutations
 
 | Action | Description |
 |---|---|
@@ -185,7 +187,7 @@ Sensitive values inside `metadata` (tokens, secrets, credentials) are redacted b
 | Migration rollback | Rolls back the most recent migration |
 | Config PUT | Updates runtime configuration values |
 
-Endpoints that do not yet emit audit entries are tracked by the audit logging issues in the current batch; this section documents the schema only.
+Endpoints that do not yet emit audit entries are tracked by the audit logging issues in the current batch; this section documents the schema and write path only.
 
 ---
 
