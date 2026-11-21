@@ -38,3 +38,28 @@ export function createTestUser(role: TestRole, userId?: string): TestUser {
   RoleStore.assign(id, role);
   return { userId: id, role, token: generateTestToken(id) };
 }
+
+/**
+ * Build an oversized webhook error string, well beyond the truncation limit
+ * used by the webhook retry job.
+ *
+ * Per closed issue #1778, webhook error text must be truncated before storage.
+ * This fixture lets tests exercise that truncation boundary uniformly instead
+ * of each test inventing its own long string.
+ *
+ * @param length  Total length of the generated string (defaults to 10,000 chars)
+ */
+export function makeOversizedWebhookError(length = 10_000): string {
+  const unit = 'webhook-error-';
+  let result = '';
+  while (result.length < length) {
+    result += unit;
+  }
+  return result.slice(0, length);
+}
+
+/**
+ * A reusable oversized webhook error string for tests that only need a value
+ * guaranteed to exceed the truncation limit.
+ */
+export const OVERSIZED_WEBHOOK_ERROR = makeOversizedWebhookError();
