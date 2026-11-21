@@ -34,6 +34,8 @@ jest.mock('../services/auditLogService', () => ({
 
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { ErrorCodes } from '../constants/ErrorCodes';
+import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
 import * as migrationService from '../admin/migrationService';
 import * as jobAdminService from '../admin/jobAdminService';
 import {
@@ -115,6 +117,36 @@ describe('Admin routes mounted at /api/admin', () => {
       .set('x-test-user-id', 'admin-user');
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
+  });
+});
+
+describe('Admin routes limit validation', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+  });
+
+  it.each([
+    { label: 'non-numeric string', limit: 'abc' },
+    { label: 'negative number', limit: -1 },
+    { label: 'value above maximum', limit: 1000000 },
+  ])(
+    'rejects $label limit on POST /admin/jobs/retry',
+    async ({ limit }) => {
+      const res = await request(app)
+        .post('/admin/jobs/retry')
+        .set('x-test-user-id', 'admin-user')
+        .send({ limit });
+      expect(res.status).toBe(422);
+      expect(res.body.code).toBe(ErrorCodes.VALIDATION_ERROR);
+    },
+  );
+
+  it('accepts a valid limit on POST /admin/jobs/retry', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ limit: 10 });
+    expect(res.status).toBe(200);
   });
 });
 

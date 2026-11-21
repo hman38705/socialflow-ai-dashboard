@@ -187,3 +187,31 @@ Endpoints that do not yet emit audit entries are tracked by the audit logging is
 
 **Tests:**
 - Unit and integration tests go in `src/__tests__/`. Do not add new tests to `src/tests/`.
+
+---
+
+## Admin module
+
+Admin routes live in `src/routes/admin.ts` and are the highest-privilege surface in the API. Every admin route is mounted behind `authenticate` and `checkPermission`, and any route that accepts numeric input must also validate it before the handler runs.
+
+### Admin numeric input validation
+
+Numeric query and body inputs on admin routes — `limit`, `batchSize`, `dryRun`, and `force` — are validated with Zod schemas applied through the shared `validate(schema, target)` middleware in `src/shared/middleware/validate.ts` (the deprecated copy at `src/middleware/validate.ts` re-exports the same behaviour; import from `src/shared/` in new code).
+
+**Pipeline position.** The middleware sits after `authenticate` and `checkPermission` and before the route handler, so unauthenticated or unauthorised requests are rejected first and only well-formed numeric input reaches the handler:
+
+```
+authenticate → checkPermission → validate(schema, 'query' | 'body') → route handler
+```
+
+**Rejection response.** When validation fails the middleware short-circuits the request and responds with HTTP `422` and a JSON body of the form:
+
+```json
+{ "errors": [{ "field": "<dot.path>", "message": "<string>" }] }
+```
+
+`field` is the dot-separated path of the offending input (for example `query.limit`) and `message` is a human-readable description. This shape matches the assertions in `src/__tests__/validate.test.ts` and the `Error` schema in `openapi.yaml`.
+
+**Success behaviour.** On success the parsed and coerced value replaces `req.body` or `req.query` (whichever `target` was specified), so handlers can rely on numeric fields already being numbers rather than strings.
+
+When adding a new admin route, define a Zod schema for its numeric inputs and mount `validate(schema, target)` in the chain above — do not parse or coerce numeric inputs inside the handler.
