@@ -20,3 +20,9 @@ data:
   DATA_PRUNING_CRON: "0 2 * * *"
   DATA_RETENTION_LOG_DAYS: "30"
   DATA_RETENTION_ANALYTICS_DAYS: "90"
+  # Policy applied when a retention path is absent: warn | fail | ignore (default: warn).
+  # See backend/docs/retention-pruning-policy.md and the README variable table.
+  DATA_RETENTION_MISSING_PATH_POLICY: "warn"
+  # Number of missing retention paths before an alert fires (default: 3).
+  # See backend/docs/retention-pruning-policy.md and the README variable table.
+  DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD: "3"

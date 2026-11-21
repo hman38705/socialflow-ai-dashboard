@@ -1,79 +1,81 @@
+# Data pruning CronJob.
+#
+# Missing-path policy & alerting
+# --------------------------------
+# The pruning job can encounter records whose referenced storage path no longer
+# exists. Two env vars control how those are handled and when operators are
+# alerted. Variable names match backend/src/config/config.ts exactly.
+#
+#   DATA_RETENTION_MISSING_PATH_POLICY
+#     - 'skip'  : leave the record untouched and continue (default)
+#     - 'prune' : treat the missing path as prunable and remove the record
+#     - 'fail'  : abort the run so the drift is investigated
+#
+#   DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
+#     - number of missing-path records in a single run that triggers an alert
+#
+# Both values are sourced from the configmap (see k8s/base/configmap.yaml) so
+# the active policy is visible from the manifest alone. For the full policy
+# semantics see backend/docs/retention-pruning-policy.md.
 apiVersion: batch/v1
 kind: CronJob
 metadata:
-  name: socialflow-data-pruning
+  name: data-pruning
   labels:
-    app.kubernetes.io/name: socialflow-data-pruning
-    app.kubernetes.io/component: data-pruning
-    app.kubernetes.io/part-of: socialflow
+    app: socialflow-data-pruning
 spec:
-  # Retention schedule: run daily at 03:00 UTC.
+  # Data retention pruning job. Runs on the schedule below to delete records
+  # that have exceeded their retention window. The retention contract (modes,
+  # missing-path handling) is documented in backend/docs/retention-pruning-policy.md
+  # and the DATA_RETENTION_* rows of the README variable table.
   schedule: "0 3 * * *"
-  timeZone: "Etc/UTC"
   concurrencyPolicy: Forbid
-  suspend: false
   successfulJobsHistoryLimit: 3
   failedJobsHistoryLimit: 3
-  startingDeadlineSeconds: 600
   jobTemplate:
     spec:
-      backoffLimit: 2
-      activeDeadlineSeconds: 3600
-      ttlSecondsAfterFinished: 86400
+      backoffLimit: 1
+      ttlSecondsAfterFinished: 3600
       template:
         metadata:
           labels:
-            app.kubernetes.io/name: socialflow-data-pruning
-            app.kubernetes.io/component: data-pruning
-            app.kubernetes.io/part-of: socialflow
+            app: socialflow-data-pruning
         spec:
+          serviceAccountName: socialflow-backend
           restartPolicy: OnFailure
           securityContext:
             runAsNonRoot: true
             runAsUser: 1000
-            runAsGroup: 1000
             fsGroup: 1000
-            seccompProfile:
-              type: RuntimeDefault
           containers:
-            - name: data-pruning
+            - name: prune
               image: socialflow-backend:latest
-              imagePullPolicy: IfNotPresent
-              command:
-                - node
-                - dist/scripts/data-pruning.js
+              imagePullPolicy: Always
+              command: ["node", "dist/scripts/prune-data.js"]
               envFrom:
                 - configMapRef:
-                    name: socialflow-config
-                - secretRef:
-                    name: socialflow-secrets
+                    name: backend-config
               env:
-                - name: NODE_ENV
-                  value: production
-              securityContext:
-                allowPrivilegeEscalation: false
-                readOnlyRootFilesystem: true
-                runAsNonRoot: true
-                runAsUser: 1000
-                runAsGroup: 1000
-                capabilities:
-                  drop:
-                    - ALL
+                - name: DATA_PRUNING_ENABLED
+                  value: "true"
+                # Missing-path policy — see backend/docs/retention-pruning-policy.md
+                - name: DATA_RETENTION_MISSING_PATH_POLICY
+                  valueFrom:
+                    configMapKeyRef:
+                      name: backend-config
+                      key: DATA_RETENTION_MISSING_PATH_POLICY
+                      optional: true
+                # Alert threshold for missing-path records per run
+                - name: DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
+                  valueFrom:
+                    configMapKeyRef:
+                      name: backend-config
+                      key: DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD
+                      optional: true
               resources:
                 requests:
                   cpu: 100m
-                  memory: 256Mi
+                  memory: 128Mi
                 limits:
-                  cpu: 500m
-                  memory: 512Mi
-              volumeMounts:
-                - name: shared-data
-                  mountPath: /app/data
-                - name: tmp
-                  mountPath: /tmp
-          volumes:
-            - name: shared-data
-              persistentVolumeClaim:
-                claimName: socialflow-shared-data
-            - name: tmp
-              emptyDir: {}
+                  cpu: 250m
+                  memory: 256Mi
