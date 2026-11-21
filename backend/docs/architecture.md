@@ -39,6 +39,14 @@ migrated.
 
 ---
 
+## Admin Audit Log
+
+Admin mutations write structured audit entries. The field schema and the list
+of covered admin actions are documented in
+[module-architecture.md](./module-architecture.md#admin-audit-log-fields).
+
+---
+
 ## Migration Plan
 
 Standalone files in `src/routes/` must be migrated into modules
@@ -52,7 +60,7 @@ first):
 | 3        | `routes/roles.ts`       | new `modules/roles/`       |                                    |
 | 4        | `routes/audit.ts`       | new `modules/audit/`       |                                    |
 | 5        | `routes/listings.ts`    | new `modules/listings/`    |                                    |
-| 6        | `routes/realtime.ts`    | new `modules/realtime/`    | see Realtime / SSE below           |
+| 6        | `routes/realtime.ts`    | new `modules/realtime/`    | see Realtime / SSE and [SSE ticket service](#sse-ticket-service) |
 | 7        | `routes/images.ts`      | new `modules/media/`       | group with video                   |
 | 8        | `routes/exports.ts`     | new `modules/exports/`     |                                    |
 | 9        | `routes/jobs.ts`        | new `modules/jobs/`        |                                    |
@@ -100,3 +108,56 @@ sweep interval values.
 - New features must start as a module under `src/modules/`.
 - A module router is mounted exclusively in `registerModules`; never imported
   directly elsewhere.
+
+---
+
+## SSE Ticket Service
+
+Server-Sent Events (SSE) connections are authenticated with short-lived,
+single-use tickets rather than long-lived bearer tokens. The realtime route
+(`routes/realtime.ts`, migrating to `modules/realtime/` — see the
+[Migration Plan](#migration-plan)) issues and redeems these tickets.
+
+### Lifecycle
+
+```
+client ──POST /realtime/ticket──▶ ticket service
+                                   │ 1. generate 32 random bytes
+                                   │ 2. hex-encode (64 chars)
+                                   │ 3. store in Redis: ticket -> userId
+                                   │    with a 30s TTL
+                                   ▼
+client ◀──ticket───────────────────┘
+
+client ──GET /realtime/stream?ticket=…──▶ ticket service
+                                          │ 4. atomic GETDEL on Redis
+                                          │ 5. valid  -> open SSE stream
+                                          │    missing -> 401
+                                          ▼
+```
+
+### Issuance
+
+- The ticket is 32 cryptographically random bytes, hex-encoded to a 64-character
+  string.
+- It is stored in Redis keyed by the ticket value, mapping to the authenticated
+  user, with a **30 second TTL**.
+- Tickets are never logged or echoed back outside the issuance response.
+
+### Redemption
+
+- Redemption uses an atomic `GETDEL`, so a ticket can be consumed exactly once
+  even under concurrent requests.
+- A missing or expired ticket yields `401`; the client must request a new one.
+- Because state lives in Redis rather than process memory, a ticket issued by
+  one replica can be redeemed by any other replica behind the load balancer.
+
+### Bounds and sweeping
+
+- The ticket map is capped in size; when the cap is reached, issuance is
+  rejected rather than growing unbounded.
+- Expired entries are removed by a periodic sweep that runs on the sweep
+  interval, in addition to Redis TTL expiry.
+- TTL and cap values are fixed here for reference only; see
+  `backend/docs/performance-budget.md` for the current numbers and their
+  rationale.

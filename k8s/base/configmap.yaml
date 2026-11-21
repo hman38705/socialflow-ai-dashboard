@@ -20,3 +20,8 @@ data:
   DATA_PRUNING_CRON: "0 2 * * *"
   DATA_RETENTION_LOG_DAYS: "30"
   DATA_RETENTION_ANALYTICS_DAYS: "90"
+  # Missing-path policy for the data pruning job (see backend/docs/retention-pruning-policy.md).
+  # Controls how records whose referenced path no longer exists are handled during pruning.
+  DATA_RETENTION_MISSING_PATH_POLICY: "skip"
+  # Alert threshold for missing-path occurrences during pruning (see backend/docs/retention-pruning-policy.md).
+  DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD: "100"
