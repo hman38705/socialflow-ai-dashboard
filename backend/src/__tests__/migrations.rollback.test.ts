@@ -254,6 +254,138 @@ describe('Migration Rollback', () => {
 
       expect(mockWriteAuditLog).not.toHaveBeenCalled();
     });
+
+    it('records the acting admin and migration on a successful rollback', async () => {
+      const ACTOR = 'admin@example.com';
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const result = await rollbackMigration(MIGRATION, mockLogger, { actor: ACTOR });
+      expect(result.success).toBe(true);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+      const entry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(entry).toMatchObject({
+        actorId: ACTOR,
+        action: expect.stringMatching(/rollback/i),
+        resourceType: expect.stringMatching(/migration/i),
+        resourceId: MIGRATION,
+      });
+      expect(entry).toEqual(
+        expect.objectContaining({
+          migration: MIGRATION,
+        }),
+      );
+    });
+
+    it('records a success outcome on a successful rollback', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+      expect(result.success).toBe(true);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+      const entry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(entry).toEqual(
+        expect.objectContaining({
+          outcome: 'success',
+        }),
+      );
+    });
+
+    it('writes an audit entry with a failure outcome when the rollback fails partway', async () => {
+      const ACTOR = 'admin@example.com';
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const failure = new Error('redis exploded mid-rollback');
+      const delSpy = jest.spyOn(redis, 'del').mockRejectedValueOnce(failure);
+
+      let result: Awaited<ReturnType<typeof rollbackMigration>>;
+      try {
+        result = await rollbackMigration(MIGRATION, mockLogger, { actor: ACTOR });
+      } finally {
+        delSpy.mockRestore();
+      }
+
+      expect(result.success).toBe(false);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+      const entry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(entry).toMatchObject({
+        actorId: ACTOR,
+        action: expect.stringMatching(/rollback/i),
+        resourceType: expect.stringMatching(/migration/i),
+        resourceId: MIGRATION,
+        outcome: 'failure',
+      });
+      expect(JSON.stringify(entry)).toContain(failure.message);
+    });
+
+    it('distinguishes success from failure via the outcome field', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const ok = await rollbackMigration(MIGRATION, mockLogger);
+      expect(ok.success).toBe(true);
+      const successEntry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(successEntry).toHaveProperty('outcome');
+      expect(successEntry.outcome).toBe('success');
+
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const delSpy = jest
+        .spyOn(redis, 'del')
+        .mockRejectedValueOnce(new Error('redis exploded mid-rollback'));
+      let failed: Awaited<ReturnType<typeof rollbackMigration>>;
+      try {
+        failed = await rollbackMigration(MIGRATION, mockLogger);
+      } finally {
+        delSpy.mockRestore();
+      }
+      expect(failed.success).toBe(false);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+      const failureEntry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(failureEntry).toHaveProperty('outcome');
+      expect(failureEntry.outcome).toBe('failure');
+      expect(failureEntry.outcome).not.toBe(successEntry.outcome);
+    });
+  });
+
+  describe('rollback force guard', () => {
+    const MIGRATION = '20260324_sync_configured_queues';
+
+    it('refuses rollback without force and does not invoke the migration service', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+
+      expect(result.success).toBe(false);
+      expect(result.status).toBe(400);
+      expect(result.errorCode).toBe('FORCE_REQUIRED');
+      expect(result.error).toMatch(/force/i);
+
+      // Guard rejected before execution: migration remains applied and untouched
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+      expect(await redis.hexists(ADMIN_MIGRATIONS_METADATA_KEY, MIGRATION)).toBe(1);
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it('permits rollback when force is set', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(1);
+
+      const result = await rollbackMigration(MIGRATION, mockLogger, { force: true });
+
+      expect(result.success).toBe(true);
+      expect(result.status).toBe(200);
+      expect(result.errorCode).toBeUndefined();
+      expect(await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, MIGRATION)).toBe(0);
+    });
   });
 
   describe('rollback error handling', () => {

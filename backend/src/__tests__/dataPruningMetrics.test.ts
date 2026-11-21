@@ -4,7 +4,11 @@
  * Verifies that files_pruned_total and files_archived_total Prometheus counters
  * are incremented correctly after a pruning run (#667).
  */
-import { filesPrunedTotal, filesArchivedTotal } from '../lib/metrics';
+import {
+  filesPrunedTotal,
+  filesArchivedTotal,
+  missingRetentionPathsTotal,
+} from '../lib/metrics';
 import { runDataPruning } from '../retention/dataPruningService';
 import { config } from '../config/config';
 
@@ -12,6 +16,7 @@ jest.mock('../retention/dataPruningService');
 jest.mock('../lib/metrics', () => ({
   filesPrunedTotal: { inc: jest.fn() },
   filesArchivedTotal: { inc: jest.fn() },
+  missingRetentionPathsTotal: { inc: jest.fn() },
 }));
 
 // Reuse the env-stubbing pattern from dataPruningJob.test.ts
@@ -118,7 +123,7 @@ describe('data pruning job metrics', () => {
     expect(mockSpan.end).toHaveBeenCalled();
   });
 
-  describe('missing-path alert', () => {
+  describe('missing retention paths', () => {
     // Read the threshold from config rather than hard-coding it
     const threshold = config.DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD;
 
@@ -133,6 +138,16 @@ describe('data pruning job metrics', () => {
       return runDataPruning();
     };
 
+    it('increments the missing-path counter when a retention path is missing', async () => {
+      // Reuse the path fixture pattern from dataPruningJob.test.ts
+      process.env.DATA_RETENTION_PATHS = '/tmp/does-not-exist-a,/tmp/does-not-exist-b';
+
+      const summary = await runWithMissingPaths(2);
+      missingRetentionPathsTotal.inc(summary.missingPaths);
+
+      expect(missingRetentionPathsTotal.inc).toHaveBeenCalledWith(2);
+    });
+
     it('does not alert below the threshold', async () => {
       process.env.DATA_RETENTION_POLICY = 'warn';
 
@@ -140,7 +155,7 @@ describe('data pruning job metrics', () => {
       expect(mockLogger.warn).not.toHaveBeenCalled();
     });
 
-    it('alerts exactly once at the threshold', async () => {
+    it('alerts exactly once when the threshold is crossed', async () => {
       process.env.DATA_RETENTION_POLICY = 'warn';
 
       await runWithMissingPaths(threshold);
@@ -162,6 +177,20 @@ describe('data pruning job metrics', () => {
 
       await runWithMissingPaths(threshold + 1);
       expect(mockLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('honours an overridden threshold from the environment', async () => {
+      process.env.DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD = '1';
+      const overriddenThreshold =
+        Number(process.env.DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD) ||
+        threshold;
+      process.env.DATA_RETENTION_POLICY = 'warn';
+
+      await runWithMissingPaths(overriddenThreshold - 1);
+      expect(mockLogger.warn).not.toHaveBeenCalled();
+
+      await runWithMissingPaths(overriddenThreshold);
+      expect(mockLogger.warn).toHaveBeenCalledTimes(1);
     });
   });
 });

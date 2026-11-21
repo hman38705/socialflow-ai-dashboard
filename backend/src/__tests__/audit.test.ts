@@ -324,5 +324,56 @@ describe('audit middleware', () => {
 
       expect(mockLog).not.toHaveBeenCalled();
     });
+
+    it('logs the failure and does not throw when the audit write rejects', () => {
+      const writeError = new Error('audit store unavailable');
+      mockLog.mockRejectedValueOnce(writeError);
+      const consoleErrorSpy = jest
+        .spyOn(console, 'error')
+        .mockImplementation(() => undefined);
+
+      try {
+        const mw = audit(
+          'admin:config:update',
+          'config',
+          () => 'config-key-4',
+          () => ({ key: 'config-key-4' }),
+        );
+        const req = makeAdminReq();
+        const res = makeRes(200);
+        const next = jest.fn();
+
+        mw(req, res as Response, next as NextFunction);
+
+        // The middleware must not propagate the audit failure to the caller.
+        expect(() => res.emit('finish')).not.toThrow();
+        expect(next).toHaveBeenCalledTimes(1);
+
+        // The audit write was attempted exactly once with the mutation context.
+        expect(mockLog).toHaveBeenCalledTimes(1);
+        expect(mockLog.mock.calls[0][0]).toMatchObject({
+          actorId: 'admin-1',
+          action: 'admin:config:update',
+          resourceType: 'config',
+          resourceId: 'config-key-4',
+        });
+
+        // The failure is logged with enough context to identify the mutation.
+        expect(consoleErrorSpy).toHaveBeenCalled();
+        const errorOutput = consoleErrorSpy.mock.calls
+          .map((call) => call.map((arg) => String(arg)).join(' '))
+          .join('\n');
+        expect(errorOutput).toContain('admin:config:update');
+        expect(errorOutput).toContain('config-key-4');
+        expect(errorOutput).toContain('audit store unavailable');
+
+        // No partial audit row is left behind: the rejected write never
+        // produced a successful record.
+        expect(mockLog.mock.results[0].status).toBe('rejected');
+        expect(mockLog).toHaveBeenCalledTimes(1);
+      } finally {
+        consoleErrorSpy.mockRestore();
+      }
+    });
   });
 });
