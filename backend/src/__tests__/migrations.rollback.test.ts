@@ -16,11 +16,18 @@ jest.mock('../lib/auditLog', () => ({
 
 const mockWriteAuditLog = writeAuditLog as jest.MockedFunction<typeof writeAuditLog>;
 
+const mockAuditLog = jest.fn();
+
+jest.mock('../admin/auditLogger', () => ({
+  auditLog: (...args: unknown[]) => mockAuditLog(...args),
+}));
+
 describe('Migration Rollback', () => {
   let redis: Redis;
   let mockLogger: Logger;
 
   beforeEach(() => {
+    mockAuditLog.mockClear();
     redis = new Redis(getRedisConnection());
     mockLogger = {
       info: jest.fn(),
@@ -107,6 +114,23 @@ describe('Migration Rollback', () => {
 
       statuses = await listMigrations();
       expect(statuses.find((s) => s.name === MIGRATION)?.applied).toBe(false);
+    });
+
+    it('writes exactly one audit log entry recording the rollback action and target migration', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockAuditLog.mockClear();
+
+      const down = await rollbackMigration(MIGRATION, mockLogger);
+      expect(down.success).toBe(true);
+
+      expect(mockAuditLog).toHaveBeenCalledTimes(1);
+      const entry = mockAuditLog.mock.calls[0][0];
+      expect(entry).toEqual(
+        expect.objectContaining({
+          action: 'migration.rollback',
+          target: MIGRATION,
+        }),
+      );
     });
   });
 
