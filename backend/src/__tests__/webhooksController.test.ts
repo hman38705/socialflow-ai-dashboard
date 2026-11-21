@@ -53,6 +53,9 @@ import {
   createWebhook,
   getWebhook,
   deleteWebhook,
+  truncateResponseBody,
+  RESPONSE_BODY_MAX_BYTES,
+  RESPONSE_BODY_TRUNCATION_MARKER,
 } from '../controllers/webhooks';
 import { rawBodyMiddleware, verifySignature } from '../middleware/verifySignature';
 
@@ -427,5 +430,48 @@ describe('Inbound webhook — idempotency', () => {
     const res = await makeSignedRequest(handlerApp, { event: 'post.published' }, SECRET);
     expect(res.status).toBe(500);
     expect(res.body.message).toBe('dispatch failed');
+  });
+});
+
+// ── Response body truncation ──────────────────────────────────────────────────
+describe('Response body truncation', () => {
+  it('truncates a body over the limit and appends the truncation marker', () => {
+    const oversized = 'a'.repeat(RESPONSE_BODY_MAX_BYTES + 100);
+
+    const stored = truncateResponseBody(oversized);
+
+    expect(stored.endsWith(RESPONSE_BODY_TRUNCATION_MARKER)).toBe(true);
+    expect(stored).toContain(RESPONSE_BODY_TRUNCATION_MARKER);
+    expect(Buffer.byteLength(stored, 'utf8')).toBeLessThanOrEqual(
+      RESPONSE_BODY_MAX_BYTES + Buffer.byteLength(RESPONSE_BODY_TRUNCATION_MARKER, 'utf8'),
+    );
+    expect(stored.length).toBeLessThan(oversized.length);
+  });
+
+  it('does not split a multibyte character mid-byte', () => {
+    // Each '€' is 3 bytes in UTF-8; fill well past the limit.
+    const multibyte = '€'.repeat(Math.ceil(RESPONSE_BODY_MAX_BYTES / 3) + 50);
+
+    const stored = truncateResponseBody(multibyte);
+
+    // No replacement characters (U+FFFD) from a broken byte sequence.
+    expect(stored).not.toContain('\uFFFD');
+    // The truncated portion (before the marker) must be valid, whole characters only.
+    const truncatedPart = stored.slice(
+      0,
+      stored.length - RESPONSE_BODY_TRUNCATION_MARKER.length,
+    );
+    expect(truncatedPart).toMatch(/^€*$/);
+    expect(Buffer.byteLength(truncatedPart, 'utf8')).toBeLessThanOrEqual(RESPONSE_BODY_MAX_BYTES);
+    expect(stored.endsWith(RESPONSE_BODY_TRUNCATION_MARKER)).toBe(true);
+  });
+
+  it('stores a body under the limit unchanged', () => {
+    const short = '{"ok":true,"message":"small payload"}';
+
+    const stored = truncateResponseBody(short);
+
+    expect(stored).toBe(short);
+    expect(stored).not.toContain(RESPONSE_BODY_TRUNCATION_MARKER);
   });
 });
