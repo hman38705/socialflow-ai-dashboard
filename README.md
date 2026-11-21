@@ -548,5 +548,7 @@ curl -v http://localhost:3001/health
 
 <!-- handsoff-issue-2089 -->
 - #2089: Add a test for the audit log entry on admin migration run
+<!-- handsoff-issue-2083 -->
+- #2083: Add a test for the admin force flag guard on migration run
 <!-- handsoff-issue-2088 -->
 - #2088: Add a test for the SSE ticket map size cap eviction order

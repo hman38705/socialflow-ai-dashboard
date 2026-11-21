@@ -116,6 +116,40 @@ Tickets are **per-process**: they live in an in-memory map on the instance that 
 
 ---
 
+## Admin endpoint validation
+
+The admin routes (`src/admin/`) are the highest-privilege surface in the app. Their numeric guards live in `src/admin/constants.ts` and are enforced by the handlers in `cacheAdminService.ts`, `jobAdminService.ts`, and `migrationService.ts`. The rules below document current behaviour only — changing a bound requires updating this section and the executable spec.
+
+### Numeric parameters
+
+| Parameter | Endpoint(s) | Default | Accepted range | Notes |
+|---|---|---|---|---|
+| `limit` | Cache clear, job retry | `DEFAULT_LIMIT` | `1` – `MAX_LIMIT` | Must be a positive integer; values above `MAX_LIMIT` are rejected |
+| `batchSize` | Job retry | `DEFAULT_BATCH_SIZE` | `1` – `MAX_BATCH_SIZE` | Must be a positive integer; values above `MAX_BATCH_SIZE` are rejected |
+| `dryRun` | Migration run/rollback | `false` | `true` / `false` | Boolean flag; when `true` the operation is simulated and no state is mutated |
+| `force` | Migration run/rollback | `false` | `true` / `false` | Boolean flag; required to bypass the force guard (see below) |
+
+The concrete values for `DEFAULT_LIMIT`, `MAX_LIMIT`, `DEFAULT_BATCH_SIZE`, and `MAX_BATCH_SIZE` are defined in `src/admin/constants.ts` and are the single source of truth. Any change to those constants must be reflected here.
+
+### Cache-clear pattern allowlist
+
+Cache-clear requests accept an optional `pattern` used to scope which keys are evicted. Only patterns on the allowlist in `src/admin/constants.ts` are accepted; any pattern not on the allowlist is rejected before the cache is touched. This prevents arbitrary wildcard eviction of unrelated keys.
+
+### Migration force guard
+
+Migration run and rollback require an explicit `force: true` to proceed against a non-empty or otherwise guarded target. Without `force`, the handler refuses the operation and returns an error rather than mutating migration state. Combined with `dryRun`, callers can preview the effect of a forced migration before applying it.
+
+### Executable specification
+
+The authoritative, executable form of these rules lives in the admin test suites:
+
+- `src/__tests__/adminRoutes.test.ts` — route-level validation of `limit`, `batchSize`, `dryRun`, and `force`.
+- `src/__tests__/jobAdminService.test.ts` — service-level bounds for job retry batching.
+
+The HTTP contract (request/response shapes and error codes) is described in `openapi.yaml` at the backend root. When the bounds in `src/admin/constants.ts` change, update this section, the OpenAPI spec, and the tests together.
+
+---
+
 ## Admin audit log fields
 
 Admin mutations write structured audit entries through the shared audit middleware (`src/shared/middleware/audit.ts`). The field schema below is the reference for new admin endpoints and for reviewers verifying completeness. It is exercised by `src/__tests__/audit.test.ts` and `src/__tests__/auditRedaction.test.ts`.

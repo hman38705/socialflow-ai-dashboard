@@ -26,10 +26,23 @@ jest.mock('../admin/migrationService', () => ({
   rollbackMigration: jest.fn().mockResolvedValue({ success: true }),
 }));
 
+// Mock the audit logger consistently with audit.test.ts so we can assert
+// that config mutations are recorded in the audit trail.
+jest.mock('../services/auditLogService', () => ({
+  logAuditEvent: jest.fn().mockResolvedValue(undefined),
+}));
+
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
-import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
+import * as migrationService from '../admin/migrationService';
+import * as jobAdminService from '../admin/jobAdminService';
+import {
+  SSETicketService,
+  SSE_TICKET_MAP_CAP,
+} from '../services/SSETicketService';
+import { logAuditEvent } from '../services/auditLogService';
 import { retryFailedJobs } from '../admin/jobAdminService';
+import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
 import { runMigrations, rollbackMigration } from '../admin/migrationService';
 
 const app = express();
@@ -100,6 +113,95 @@ describe('Admin routes mounted at /api/admin', () => {
     const res = await request(mountedApp)
       .get('/api/admin/jobs/queues')
       .set('x-test-user-id', 'admin-user');
+    expect(res.status).toBe(200);
+    expect(res.body).toBeDefined();
+  });
+});
+
+// Central error handler convention (see #1761): { success: false, code, message, timestamp }
+function expectErrorShape(body: any) {
+  expect(body).toBeDefined();
+  expect(body.success).toBe(false);
+  expect(typeof body.code).toBe('string');
+  expect(typeof body.message).toBe('string');
+  expect(body.timestamp).toBeDefined();
+}
+
+describe('Admin config audit logging', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (logAuditEvent as jest.Mock).mockClear();
+  });
+
+  it('writes an audit log entry capturing the changed key and acting admin on config PUT', async () => {
+    const res = await request(app)
+      .put('/admin/config')
+      .set('x-test-user-id', 'admin-user')
+      .send({ key: 'featureFlags.newDashboard', value: true });
+
+    expect(res.status).toBeLessThan(400);
+    expect(logAuditEvent).toHaveBeenCalledTimes(1);
+
+    const entry = (logAuditEvent as jest.Mock).mock.calls[0][0];
+    expect(entry).toEqual(
+      expect.objectContaining({
+        actorId: 'admin-user',
+        action: expect.stringMatching(/config/i),
+      }),
+    );
+    expect(JSON.stringify(entry)).toContain('featureFlags.newDashboard');
+  });
+});
+
+describe('Admin numeric input validation', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    (retryFailedJobs as jest.Mock).mockClear();
+  });
+
+  it('rejects a non-numeric limit with a 400', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues')
+      .query({ limit: 'not-a-number' })
+      .set('x-test-user-id', 'admin-user');
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+  });
+
+  it('rejects a non-numeric batchSize with a 400', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: 'not-a-number' });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+    expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('enforces the upper bound on batchSize', async () => {
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ batchSize: MAX_BATCH_SIZE + 1 });
+
+    expect(res.status).toBe(400);
+    expect(res.body).toEqual(
+      expect.objectContaining({ error: expect.any(String) }),
+    );
+    expect(retryFailedJobs).not.toHaveBeenCalled();
+  });
+
+  it('applies the default limit when omitted', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues')
+      .set('x-test-user-id', 'admin-user');
+
     expect(res.status).toBe(200);
     expect(res.body).toBeDefined();
   });
@@ -250,5 +352,111 @@ describe('Admin dryRun flag validation', () => {
     expect(runMigrations).toHaveBeenCalledTimes(1);
     const callArg = (runMigrations as jest.Mock).mock.calls[0][0];
     expect(callArg?.dryRun ?? false).toBe(false);
+  });
+});
+
+describe('Admin force guard (#2061)', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects POST /admin/migrations/run without force', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+    expect(res.status).toBe(400);
+    expectErrorShape(res.body);
+    // The guard must short-circuit before the destructive operation runs.
+    expect(migrationService.runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('rejects POST /admin/migrations/run when force is false', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: false });
+    expect(res.status).toBe(400);
+    expectErrorShape(res.body);
+    expect(migrationService.runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with POST /admin/migrations/run when force is true', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true });
+    expect(res.status).toBe(200);
+    expect(migrationService.runMigrations).toHaveBeenCalled();
+  });
+});
+
+describe('Admin limit parameter validation (#2063)', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects a non-numeric limit with 400', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues?limit=abc')
+      .set('x-test-user-id', 'admin-user');
+    expect(res.status).toBe(400);
+    expectErrorShape(res.body);
+  });
+
+  it('rejects a negative limit', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues?limit=-5')
+      .set('x-test-user-id', 'admin-user');
+    expect(res.status).toBe(400);
+    expectErrorShape(res.body);
+  });
+
+  it('accepts a valid limit and returns success', async () => {
+    const res = await request(app)
+      .get('/admin/jobs/queues?limit=10')
+      .set('x-test-user-id', 'admin-user');
+    expect(res.status).toBe(200);
+    expect(jobAdminService.getDiscoveredQueueNames).toHaveBeenCalled();
+  });
+});
+
+describe('SSE ticket map size cap eviction (#2064)', () => {
+  beforeEach(() => {
+    jest.useFakeTimers();
+    SSETicketService.clear();
+  });
+
+  afterEach(() => {
+    SSETicketService.clear();
+    jest.useRealTimers();
+  });
+
+  it('never grows the ticket map past its cap', () => {
+    for (let i = 0; i < SSE_TICKET_MAP_CAP + 10; i++) {
+      jest.advanceTimersByTime(1);
+      SSETicketService.issueTicket(`user-${i}`);
+      expect(SSETicketService.size()).toBeLessThanOrEqual(SSE_TICKET_MAP_CAP);
+    }
+  });
+
+  it('evicts the oldest ticket when the cap is reached', () => {
+    for (let i = 0; i < SSE_TICKET_MAP_CAP; i++) {
+      jest.advanceTimersByTime(1);
+      SSETicketService.issueTicket(`user-${i}`);
+    }
+    expect(SSETicketService.size()).toBe(SSE_TICKET_MAP_CAP);
+
+    jest.advanceTimersByTime(1);
+    const overflowTicket = SSETicketService.issueTicket('user-overflow');
+
+    expect(SSETicketService.size()).toBeLessThanOrEqual(SSE_TICKET_MAP_CAP);
+    // The oldest entry (user-0) must be the one evicted, not an arbitrary key.
+    expect(SSETicketService.has(`user-0`)).toBe(false);
+    expect(SSETicketService.has('user-1')).toBe(true);
+    expect(SSETicketService.has('user-overflow')).toBe(true);
+    expect(overflowTicket).toBeDefined();
   });
 });
