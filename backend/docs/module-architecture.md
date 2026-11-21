@@ -205,6 +205,8 @@ Because the write happens on response finish, the entry reflects the actual outc
 
 When adding a new admin route, mount it behind the shared audit middleware and add its action identifier to the table above — do not write audit entries inside the handler.
 
+Endpoints that do not yet emit audit entries are tracked by the audit logging issues in the current batch; this section documents the schema and write path only.
+
 ---
 
 ## Contribution guidelines

@@ -34,6 +34,8 @@ When a configured retention path does not exist, the pruning run consults `DATA_
 | `DATA_RETENTION_MISSING_PATH_POLICY`          | `warn`  | `warn`, `fail`, `ignore` |
 | `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`     | positive integer        |
 
+The modes documented here (`warn`, `fail`, `ignore`) are the source of truth for runtime behavior. The Kubernetes CronJob manifest at [`k8s/base/data-pruning-cronjob.yaml`](../../k8s/base/data-pruning-cronjob.yaml) is the deployment reference for the scheduled job; note that it currently lists `skip`/`prune` values that differ from the documented modes. Treat this document and the `README.md` defaults as authoritative, and do not infer behavior from the manifest's values.
+
 ### Mode semantics
 
 `DATA_RETENTION_MISSING_PATH_POLICY` supports `warn`, `fail`, and `ignore`.
@@ -43,24 +45,26 @@ When a configured retention path does not exist, the pruning run consults `DATA_
 - Each missing path is logged as a warning and counted toward the run's missing-path total.
 - Pruning continues for all remaining paths.
 - If the missing-path count reaches `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD`, an alert is emitted for the run.
+- When to use: the recommended default for most deployments. It keeps pruning running while surfacing missing paths so operators can investigate before data loss is masked.
 
 #### `fail` mode
 
 - The first missing path aborts the pruning run with an error.
 - No further paths are processed after the failure.
-- Use with care in production: a path that is temporarily absent (for example, an unmounted volume) will stop pruning entirely.
+- When to use: environments where a missing path indicates a serious misconfiguration (for example, an unmounted volume) and pruning must not proceed silently. Use with care in production: a path that is temporarily absent will stop pruning entirely.
 
 #### `ignore` mode
 
 - Missing paths are silently skipped; no warning is logged and they are not counted toward the alert threshold.
 - Pruning continues for all remaining paths.
+- When to use: only when missing paths are expected and benign (for example, optional category directories that are intentionally absent). Avoid in production, as it can mask data loss.
 
 ### Alert threshold
 
 `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` (default `3`) controls when a `warn`-mode run raises an alert.
 
 - Counting is per run: the missing-path total is reset at the start of each pruning run and is not carried across runs.
-- The alert fires when the number of missing paths encountered during the run is greater than or equal to the threshold.
+- The alert fires when the number of missing paths encountered during the run is greater than or equal to the threshold (default: 3 or more missing paths in a single run).
 - The threshold has no effect in `fail` mode (the run aborts on the first missing path) or `ignore` mode (missing paths are not counted).
 =======
 

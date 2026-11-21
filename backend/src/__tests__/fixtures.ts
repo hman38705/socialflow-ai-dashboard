@@ -123,3 +123,15 @@ export function makeOversizedWebhookError(length = 10_000): string {
  * guaranteed to exceed the truncation limit.
  */
 export const OVERSIZED_WEBHOOK_ERROR = makeOversizedWebhookError();
+
+/**
+ * A deterministic oversized webhook response body for exercising truncation
+ * in the webhook retry job.
+ *
+ * Built from repeated multibyte content (emoji surrogate pairs and CJK
+ * characters interleaved with ASCII) so it is well over the retry job's
+ * truncation limit and any fixed-length truncation is likely to land inside a
+ * multibyte character or surrogate pair. Use this instead of inventing
+ * per-test long strings when testing response body truncation.
+ */
+export const OVERSIZED_WEBHOOK_RESPONSE_BODY = createMultibyteBody(10_000);

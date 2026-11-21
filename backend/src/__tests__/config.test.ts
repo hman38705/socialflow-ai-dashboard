@@ -131,3 +131,66 @@ describe('PUT /api/v1/config/:key — admin only', () => {
     expect(entry?.metadata?.value).toBe('true');
   });
 });
+
+describe('PUT /api/v1/config/:key — payload validation', () => {
+  it('accepts a valid boolean payload and returns 200', async () => {
+    const res = await request(app)
+      .put('/api/v1/config/feature_valid_bool')
+      .set('Authorization', `Bearer ${token(adminId)}`)
+      .send({ value: 'true', type: 'boolean' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('accepts a valid string payload and returns 200', async () => {
+    const res = await request(app)
+      .put('/api/v1/config/feature_valid_string')
+      .set('Authorization', `Bearer ${token(adminId)}`)
+      .send({ value: 'hello', type: 'string' });
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+  });
+
+  it('rejects or strips unknown keys in the payload', async () => {
+    const res = await request(app)
+      .put('/api/v1/config/feature_unknown_key')
+      .set('Authorization', `Bearer ${token(adminId)}`)
+      .send({ value: 'true', type: 'boolean', unexpectedKey: 'nope' });
+
+    // Documented policy: unknown keys are either rejected (400) or stripped.
+    expect([200, 400]).toContain(res.status);
+    expect(res.status).not.toBe(500);
+
+    if (res.status === 400) {
+      expect(res.body.success).toBe(false);
+      expect(typeof res.body.message).toBe('string');
+    } else {
+      expect(res.body.success).toBe(true);
+      // The unknown key must not be persisted anywhere in the response body.
+      expect(JSON.stringify(res.body)).not.toContain('unexpectedKey');
+      expect(JSON.stringify(res.body)).not.toContain('nope');
+    }
+  });
+
+  it('returns 400 (not 500) for a type mismatch', async () => {
+    const res = await request(app)
+      .put('/api/v1/config/feature_type_mismatch')
+      .set('Authorization', `Bearer ${token(adminId)}`)
+      .send({ value: 'not-a-number', type: 'number' });
+    expect(res.status).toBe(400);
+    expect(res.status).not.toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.message).toBe('string');
+  });
+
+  it('returns 400 (not 500) for an invalid type value', async () => {
+    const res = await request(app)
+      .put('/api/v1/config/feature_invalid_type')
+      .set('Authorization', `Bearer ${token(adminId)}`)
+      .send({ value: 'true', type: 'not-a-real-type' });
+    expect(res.status).toBe(400);
+    expect(res.status).not.toBe(500);
+    expect(res.body.success).toBe(false);
+    expect(typeof res.body.message).toBe('string');
+  });
+});
