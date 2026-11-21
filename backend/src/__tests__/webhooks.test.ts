@@ -44,7 +44,11 @@ global.fetch = mockFetch as unknown as typeof fetch;
 
 import { attemptDelivery, dispatchEvent, retryPendingDeliveries } from '../services/WebhookDispatcher';
 import { encryptWebhookSecret } from '../lib/webhookSecretCrypto';
-import { MAX_ERROR_MESSAGE_LENGTH, TRUNCATION_MARKER } from '../jobs/webhookRetryJob';
+import {
+  MAX_ERROR_LENGTH,
+  MAX_ERROR_MESSAGE_LENGTH,
+  TRUNCATION_MARKER,
+} from '../jobs/webhookRetryJob';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -154,6 +158,39 @@ describe('attemptDelivery', () => {
 
     const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect((options.headers as Record<string, string>)['X-SocialFlow-Delivery']).toBe('del-xyz');
+  });
+
+  it('truncates an oversized error body and appends the truncation marker', async () => {
+    const oversizedBody = 'x'.repeat(MAX_ERROR_LENGTH * 2);
+    mockFetch.mockResolvedValue({ ok: false, status: 500, text: async () => oversizedBody });
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-1', url, secret, payload, 1);
+
+    const updateArg = mockUpdate.mock.calls[0][0] as {
+      data: { errorMessage: string };
+    };
+    const storedError = updateArg.data.errorMessage;
+
+    expect(storedError.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(storedError.length).toBeLessThan(oversizedBody.length);
+    expect(storedError.length).toBe(MAX_ERROR_LENGTH + TRUNCATION_MARKER.length);
+  });
+
+  it('stores a short error body unchanged with no truncation marker', async () => {
+    const shortBody = 'short error';
+    mockFetch.mockResolvedValue({ ok: false, status: 500, text: async () => shortBody });
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-1', url, secret, payload, 1);
+
+    const updateArg = mockUpdate.mock.calls[0][0] as {
+      data: { errorMessage: string };
+    };
+    const storedError = updateArg.data.errorMessage;
+
+    expect(storedError).toBe(shortBody);
+    expect(storedError.includes(TRUNCATION_MARKER)).toBe(false);
   });
 });
 
