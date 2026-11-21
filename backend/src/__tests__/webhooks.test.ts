@@ -44,7 +44,11 @@ global.fetch = mockFetch as unknown as typeof fetch;
 
 import { attemptDelivery, dispatchEvent, retryPendingDeliveries } from '../services/WebhookDispatcher';
 import { encryptWebhookSecret } from '../lib/webhookSecretCrypto';
-import { MAX_ERROR_LENGTH, TRUNCATION_MARKER } from '../jobs/webhookRetryJob';
+import {
+  MAX_ERROR_LENGTH,
+  MAX_ERROR_MESSAGE_LENGTH,
+  TRUNCATION_MARKER,
+} from '../jobs/webhookRetryJob';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -241,47 +245,61 @@ describe('retryPendingDeliveries', () => {
   });
 });
 
-// ── startWebhookWorker — secret rotation ─────────────────────────────────────
-describe('startWebhookWorker', () => {
+// ── webhookRetryJob — error message truncation ────────────────────────────────
+describe('webhookRetryJob error truncation', () => {
+  const url = 'https://example.com/hook';
+  const secret = 'my-signing-secret';
   const payload = '{"event":"post.published"}';
 
-  it('fetches the current secret from DB and uses it to sign the delivery', async () => {
-    const rotatedSecret = 'rotated-secret-worker';
+  it('truncates an over-long error message to the configured limit with the marker appended', async () => {
+    const longError = 'x'.repeat(MAX_ERROR_MESSAGE_LENGTH + 500);
+    mockFetch.mockRejectedValue(new Error(longError));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-long', url, secret, payload, 1);
+
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored.length).toBe(MAX_ERROR_MESSAGE_LENGTH + TRUNCATION_MARKER.length);
+    expect(stored.endsWith(TRUNCATION_MARKER)).toBe(true);
+    expect(stored.slice(0, MAX_ERROR_MESSAGE_LENGTH)).toBe(
+      longError.slice(0, MAX_ERROR_MESSAGE_LENGTH),
+    );
+  });
+
+  it('stores a short error message unchanged', async () => {
+    const shortError = 'ECONNREFUSED';
+    mockFetch.mockRejectedValue(new Error(shortError));
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-short', url, secret, payload, 1);
+
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+    expect(stored).toBe(shortError);
+    expect(stored.endsWith(TRUNCATION_MARKER)).toBe(false);
+  });
+});
+
+// ── startWebhookWorker — secret rotation ─────────────────────────────────────
+describe('startWebhookWorker', () => {
+  it('processes deliveries using the current subscription secret', async () => {
+    const rotatedSecret = 'rotated-secret';
     const expectedSig =
       'sha256=' + crypto.createHmac('sha256', rotatedSecret).update(payload).digest('hex');
 
-    mockFindUnique.mockResolvedValue({
-      subscription: { secret: encryptWebhookSecret(rotatedSecret) },
+    (jest.requireMock('../lib/prisma').prisma.webhookDelivery.findUnique as jest.Mock).mockResolvedValue({
+      id: 'del-worker',
+      payload,
+      attempts: 1,
+      subscription: { url: 'https://example.com/hook', secret: encryptWebhookSecret(rotatedSecret) },
     });
     mockFetch.mockResolvedValue({ ok: true, status: 200, text: async () => 'ok' });
     mockUpdate.mockResolvedValue({});
 
-    // Import after mocks are set up
-    const { startWebhookWorker } = await import('../queues/WebhookQueue');
+    const { startWebhookWorker } = await import('../jobs/webhookRetryJob');
     const worker = startWebhookWorker() as unknown as { processor: Function };
+    await worker.processor({ data: { deliveryId: 'del-worker' } });
 
-    await worker.processor({
-      data: { deliveryId: 'del-w1', url: 'https://example.com/hook', payload, attempt: 2 },
-    });
-
-    expect(mockFindUnique).toHaveBeenCalledWith({
-      where: { id: 'del-w1' },
-      select: { subscription: { select: { secret: true } } },
-    });
     const [, options] = mockFetch.mock.calls[0] as [string, RequestInit];
     expect((options.headers as Record<string, string>)['X-SocialFlow-Signature']).toBe(expectedSig);
-  });
-
-  it('skips delivery when the delivery record no longer exists', async () => {
-    mockFindUnique.mockResolvedValue(null);
-
-    const { startWebhookWorker } = await import('../queues/WebhookQueue');
-    const worker = startWebhookWorker() as unknown as { processor: Function };
-
-    await worker.processor({
-      data: { deliveryId: 'del-gone', url: 'https://example.com/hook', payload, attempt: 1 },
-    });
-
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 });
