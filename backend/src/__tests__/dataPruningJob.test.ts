@@ -43,6 +43,12 @@ jest.mock('bullmq', () => ({
   }),
 }));
 
+// ── mock alert notifier ───────────────────────────────────────────────────────
+const mockSendAlert = jest.fn();
+jest.mock('../lib/alerts', () => ({
+  sendAlert: mockSendAlert,
+}));
+
 // ── mock runtime config ───────────────────────────────────────────────────────
 const mockGetDataRetentionConfig = jest.fn();
 jest.mock('../config/runtime', () => ({
@@ -205,6 +211,68 @@ describe('dataPruningJob — missing path policy: ignore', () => {
     // No pruning attempted for the missing path
     expect(mockFilesPrunedInc).toHaveBeenCalledWith(0);
     expect(mockFilesArchivedInc).toHaveBeenCalledWith(0);
+  });
+});
+
+// ── missing-path alert threshold ──────────────────────────────────────────────
+describe('dataPruningJob — missing-path alert threshold', () => {
+  it('does not send an alert when the missing-path count is below the threshold', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathAlertThreshold: 3,
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs', '/analytics'],
+    });
+
+    await capturedProcessor!();
+
+    expect(mockSendAlert).not.toHaveBeenCalled();
+  });
+
+  it('sends exactly one alert when the missing-path count meets the threshold', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathAlertThreshold: 2,
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs', '/analytics'],
+    });
+
+    await capturedProcessor!();
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+  });
+
+  it('includes the missing paths in the alert payload', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathAlertThreshold: 2,
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs', '/analytics', '/archive'],
+    });
+
+    await capturedProcessor!();
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+    const payload = mockSendAlert.mock.calls[0][0];
+    const serialized = JSON.stringify(payload);
+    expect(serialized).toContain('/logs');
+    expect(serialized).toContain('/analytics');
+    expect(serialized).toContain('/archive');
   });
 });
 

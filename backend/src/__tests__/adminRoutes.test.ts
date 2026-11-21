@@ -28,7 +28,9 @@ jest.mock('../admin/migrationService', () => ({
 
 import { RoleStore } from '../models/Role';
 import adminRouter from '../routes/admin';
+import { MAX_BATCH_SIZE, DEFAULT_LIMIT } from '../admin/constants';
 import { retryFailedJobs } from '../admin/jobAdminService';
+import { runMigrations, rollbackMigration } from '../admin/migrationService';
 import { ErrorCodes } from '../lib/errors';
 
 const app = express();
@@ -105,9 +107,6 @@ describe('Admin routes mounted at /api/admin', () => {
 });
 
 describe('Admin job retry batchSize bounds', () => {
-  // Maximum allowed batchSize for the retry endpoint.
-  const MAX_BATCH_SIZE = 100;
-
   beforeEach(() => {
     RoleStore.assign('admin-user', 'admin');
     (retryFailedJobs as jest.Mock).mockClear();
@@ -132,5 +131,153 @@ describe('Admin job retry batchSize bounds', () => {
 
     expect(res.status).toBe(200);
     expect(retryFailedJobs).toHaveBeenCalled();
+  });
+});
+
+describe('Admin batchSize upper bound', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects batchSize above the maximum with a 400 naming batchSize', async () => {
+    const res = await request(app)
+      .post('/admin/cache/clear')
+      .set('x-test-user-id', 'admin-user')
+      .send({ pattern: 'user:*', batchSize: MAX_BATCH_SIZE + 1 });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'batchSize')).toBe(true);
+  });
+
+  it('accepts batchSize exactly at the maximum', async () => {
+    const res = await request(app)
+      .post('/admin/cache/clear')
+      .set('x-test-user-id', 'admin-user')
+      .send({ pattern: 'user:*', batchSize: MAX_BATCH_SIZE });
+
+    expect(res.status).not.toBe(400);
+  });
+});
+
+describe('Admin limit default', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('returns the documented default number of rows when limit is omitted', async () => {
+    const rows = Array.from({ length: DEFAULT_LIMIT + 1 }, (_, i) => ({ id: i }));
+    (retryFailedJobs as jest.Mock).mockResolvedValueOnce({ processed: rows });
+
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+
+    expect(res.status).toBe(200);
+    const returned = res.body.processed ?? res.body;
+    expect(returned.length).toBe(DEFAULT_LIMIT);
+  });
+
+  it('lets an explicit limit override the default', async () => {
+    const rows = Array.from({ length: DEFAULT_LIMIT + 1 }, (_, i) => ({ id: i }));
+    (retryFailedJobs as jest.Mock).mockResolvedValueOnce({ processed: rows });
+
+    const res = await request(app)
+      .post('/admin/jobs/retry')
+      .set('x-test-user-id', 'admin-user')
+      .send({ limit: 1 });
+
+    expect(res.status).toBe(200);
+    const returned = res.body.processed ?? res.body;
+    expect(returned.length).toBe(1);
+  });
+});
+
+describe('Admin force flag rejection', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects force as a string on /admin/migrations/run with a 400 naming force', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: 'false' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'force')).toBe(true);
+    expect(runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('rejects force as a number on /admin/migrations/run with a 400 naming force', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: 1 });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'force')).toBe(true);
+    expect(runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('rejects force as a string on the rollback route with a 400 naming force', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/test/rollback')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: 'false' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'force')).toBe(true);
+    expect(rollbackMigration).not.toHaveBeenCalled();
+  });
+
+  it('rejects force as a number on the rollback route with a 400 naming force', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/test/rollback')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: 1 });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'force')).toBe(true);
+    expect(rollbackMigration).not.toHaveBeenCalled();
+  });
+});
+
+describe('Admin dryRun flag validation', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects dryRun as a string with a 400 naming dryRun', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ dryRun: 'true' });
+
+    expect(res.status).toBe(400);
+    expect(Array.isArray(res.body.errors)).toBe(true);
+    expect(res.body.errors.some((e: any) => e.field === 'dryRun')).toBe(true);
+    expect(runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('applies the documented default when dryRun is omitted', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({});
+
+    expect(res.status).not.toBe(400);
+    expect(runMigrations).toHaveBeenCalledTimes(1);
+    const callArg = (runMigrations as jest.Mock).mock.calls[0][0];
+    expect(callArg?.dryRun ?? false).toBe(false);
   });
 });
