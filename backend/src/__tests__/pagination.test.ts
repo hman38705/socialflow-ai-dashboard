@@ -163,6 +163,39 @@ describe('validateCursorOrganization — org-scoped guard (#1109)', () => {
 
 // ── Page-size clamping and rejection ──────────────────────────────────────────
 
+// Single source of truth for the upper bound on the admin limit parameter.
+// Keep this in sync with the implementation so the boundary tests track it.
+const MAX_LIMIT = 100;
+
+describe('admin limit upper bound (#1986)', () => {
+  it('accepts a limit exactly at the maximum boundary', () => {
+    const result = pageLimitSchema.safeParse({ page: 1, limit: MAX_LIMIT });
+    expect(result.success).toBe(true);
+    if (result.success) expect(result.data.limit).toBe(MAX_LIMIT);
+  });
+
+  it('rejects or clamps a limit just above the maximum', () => {
+    const result = pageLimitSchema.safeParse({ page: 1, limit: MAX_LIMIT + 1 });
+    if (result.success) {
+      // Clamped to the maximum
+      expect(result.data.limit).toBe(MAX_LIMIT);
+    } else {
+      // Rejected with a validation error on the limit field
+      expect(result.success).toBe(false);
+      const issues = result.error.issues;
+      expect(issues.some((issue) => issue.path.includes('limit'))).toBe(true);
+    }
+  });
+
+  it('rejects a non-numeric limit', () => {
+    const result = pageLimitSchema.safeParse({ page: 1, limit: 'abc' });
+    expect(result.success).toBe(false);
+    if (!result.success) {
+      expect(result.error.issues.some((issue) => issue.path.includes('limit'))).toBe(true);
+    }
+  });
+});
+
 describe('pageLimitSchema — page-size clamping (#1109)', () => {
   it('accepts page size within range', () => {
     const result = pageLimitSchema.safeParse({ page: 1, limit: 20 });
