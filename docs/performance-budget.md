@@ -49,6 +49,23 @@ for `fonts.googleapis.com` and `fonts.gstatic.com`. `tailwind.config.js`'s `font
 fallback, so text renders immediately in a system font and reflows to Fira Sans/Fira Code once the
 webfont arrives — no invisible-text flash.
 
+## SSE ticket sweep
+
+The SSE ticket service keeps issued tickets in an in-memory map and periodically sweeps it to
+drop expired entries. The interval is defined in
+[`backend/src/services/sseTicketService.ts`](../backend/src/services/sseTicketService.ts) as
+`DEFAULT_SWEEP_INTERVAL_MS = 10_000` (every 10 seconds), with a ticket TTL of 30s.
+
+- **Recurring cost:** one full pass over the in-memory ticket map every 10s. The work per sweep is
+  proportional to the number of live tickets, so it stays negligible while the map is small and
+  grows linearly with concurrent SSE connections.
+- **Relationship to the map size cap:** the sweep frequency and the size cap bound the same cost
+  from two directions — the cap limits how many entries a single pass must visit, while the
+  interval limits how often that pass runs. A shorter interval multiplies the per-pass cost; a
+  larger cap raises it. Any change to either should be judged against this baseline.
+- **Out of scope here:** unref'ing the sweep interval (issue #1965) and adding the size cap
+  (issue #1961) are tracked separately.
+
 ## CI wiring
 
 `.github/workflows/frontend.yml`:

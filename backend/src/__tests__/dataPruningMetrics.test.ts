@@ -162,6 +162,13 @@ describe('data pruning job metrics', () => {
       expect(mockLogger.warn).toHaveBeenCalledTimes(1);
     });
 
+    it('alerts above the threshold', async () => {
+      process.env.DATA_RETENTION_POLICY = 'warn';
+
+      await runWithMissingPaths(threshold + 1);
+      expect(mockLogger.warn).toHaveBeenCalledTimes(1);
+    });
+
     it('does not alert when the policy is set to ignore', async () => {
       process.env.DATA_RETENTION_POLICY = 'ignore';
 

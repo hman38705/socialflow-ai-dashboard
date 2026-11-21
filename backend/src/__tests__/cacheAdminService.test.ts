@@ -17,7 +17,13 @@ jest.mock('../lib/auditLogger', () => ({
   auditLog: (...args: unknown[]) => mockAuditLog(...args),
 }));
 
-import { clearCache, getCacheStats, MAX_KEYS_PER_CALL } from '../admin/cacheAdminService';
+import {
+  clearCache,
+  getCacheStats,
+  isAllowedCachePattern,
+  DisallowedCachePatternError,
+  MAX_KEYS_PER_CALL,
+} from '../admin/cacheAdminService';
 import type { Logger } from '../lib/logger';
 
 // Mirrors the allowlist enforcement in POST /admin/cache/clear (backend/src/routes/admin.ts).
@@ -242,6 +248,31 @@ describe('clearCache — pattern allowlist (issue #1757)', () => {
     expect(typeof caught).not.toBe('string');
     expect(mockScan).not.toHaveBeenCalled();
     expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it('rejects a bare wildcard pattern with DisallowedCachePatternError and issues no delete', async () => {
+    await expect(
+      clearCache({ pattern: '*', batchSize: 100 }, mockLogger),
+    ).rejects.toBeInstanceOf(DisallowedCachePatternError);
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+  });
+
+  it('accepts a scoped pattern and deletes the matched keys', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['cache:1', 'cache:2']]);
+    mockUnlink.mockResolvedValueOnce(2);
+
+    const result = await clearCache({ pattern: 'cache:*', batchSize: 100 }, mockLogger);
+
+    expect(result.deletedKeys).toBe(2);
+    expect(result.matchedKeys).toBe(2);
+    expect(mockUnlink).toHaveBeenCalledWith('cache:1', 'cache:2');
+  });
+
+  it('exposes isAllowedCachePattern consistent with the allowlist', () => {
+    expect(isAllowedCachePattern('*')).toBe(false);
+    expect(isAllowedCachePattern('cache:*')).toBe(true);
   });
 
   it('rejects a wildcard-only pattern', () => {
