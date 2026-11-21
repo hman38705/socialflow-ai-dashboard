@@ -8,6 +8,13 @@ import {
   KNOWN_QUEUES_SET_KEY,
 } from '../admin/constants';
 import { getRedisConnection } from '../config/runtime';
+import { writeAuditLog } from '../lib/auditLog';
+
+jest.mock('../lib/auditLog', () => ({
+  writeAuditLog: jest.fn(),
+}));
+
+const mockWriteAuditLog = writeAuditLog as jest.MockedFunction<typeof writeAuditLog>;
 
 const mockAuditLog = jest.fn();
 
@@ -30,6 +37,7 @@ describe('Migration Rollback', () => {
       error: jest.fn(),
       debug: jest.fn(),
     } as unknown as Logger;
+    mockWriteAuditLog.mockClear();
   });
 
   afterEach(async () => {
@@ -179,6 +187,50 @@ describe('Migration Rollback', () => {
         actor: ACTOR,
         target: MIGRATION,
       });
+    });
+  });
+
+  describe('rollback audit logging', () => {
+    const MIGRATION = '20260324_sync_configured_queues';
+
+    it('writes exactly one audit entry on a successful rollback', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+      expect(result.success).toBe(true);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+    });
+
+    it('audit entry carries the rollback action and migration identifier', async () => {
+      await runMigrations({ dryRun: false }, mockLogger);
+      mockWriteAuditLog.mockClear();
+
+      await rollbackMigration(MIGRATION, mockLogger);
+
+      expect(mockWriteAuditLog).toHaveBeenCalledTimes(1);
+      const entry = mockWriteAuditLog.mock.calls[0][0] as unknown as Record<string, unknown>;
+      expect(entry).toEqual(
+        expect.objectContaining({
+          action: expect.stringMatching(/rollback/i),
+          migration: MIGRATION,
+        }),
+      );
+    });
+
+    it('writes no audit entry when rollback is rejected before execution', async () => {
+      const result = await rollbackMigration('nonexistent_migration', mockLogger);
+      expect(result.success).toBe(false);
+
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
+    });
+
+    it('writes no audit entry when migration was never applied', async () => {
+      const result = await rollbackMigration(MIGRATION, mockLogger);
+      expect(result.success).toBe(false);
+
+      expect(mockWriteAuditLog).not.toHaveBeenCalled();
     });
   });
 

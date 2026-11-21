@@ -253,7 +253,7 @@ describe('audit middleware', () => {
     });
   });
 
-  describe('admin config PUT audit entry', () => {
+  describe('admin config change audit', () => {
     // Admin authentication fixture: an authenticated admin actor, mirroring the
     // admin request setup used by the other admin tests in the suite.
     function makeAdminReq(overrides: Partial<AuthRequest> = {}): AuthRequest {
@@ -263,7 +263,7 @@ describe('audit middleware', () => {
       });
     }
 
-    it('writes an audit entry identifying the actor and config mutation on success', () => {
+    it('writes an audit entry capturing the changed key and acting admin on config PUT', () => {
       const mw = audit(
         'admin:config:update',
         'config',
@@ -309,7 +309,7 @@ describe('audit middleware', () => {
       });
     });
 
-    it('does not write the audit entry when the config PUT fails', () => {
+    it('does not write an audit entry when the config PUT fails', () => {
       const mw = audit(
         'admin:config:update',
         'config',
