@@ -114,6 +114,34 @@ These are planned features (see `.kiro/specs/stellar-web3-integration/`).
 
 ---
 
+## SSE Ticket Service
+
+Server-Sent Events (SSE) connections are authenticated with short-lived, single-use tickets rather than long-lived credentials. The implementation lives in [`backend/src/services/sseTicketService.ts`](../backend/src/services/sseTicketService.ts).
+
+### Ticket issuance
+
+- A ticket is a random 24-byte value rendered as a hex string.
+- Tickets are short-lived: each one carries a TTL and is intended to be redeemed once, immediately after issuance.
+- A ticket is consumed on first use; a second attempt to redeem the same ticket is rejected.
+
+### Ticket storage
+
+- Tickets are held in an in-memory `Map` inside the service module.
+- The map is **per process**. There is no shared store (no Redis, no database) backing it.
+
+### Ticket sweeping
+
+- A periodic interval removes expired entries from the map.
+- The interval is `unref`'d so it does not keep the Node.js event loop alive on its own.
+
+### Multi-replica consequence
+
+Because tickets are held per process, a ticket issued by one replica is **not** visible to any other replica. In a multi-replica deployment, a client that obtains a ticket from replica A and then opens the SSE connection against replica B will have the ticket rejected. Operators seeing SSE failures immediately after a rollout or behind a load balancer should check whether ticket issuance and connection handling are landing on the same process.
+
+> Changing ticket storage to a shared store is tracked separately and is out of scope for this document.
+
+---
+
 ## Environment Variables Summary
 
 | Variable | Required by | Status |
@@ -122,3 +150,9 @@ These are planned features (see `.kiro/specs/stellar-web3-integration/`).
 | `PINATA_SECRETS` | IPFS/NFT upload | Not implemented yet |
 
 All other env vars mentioned in the README (Stellar RPC endpoints, wallet configs) have no corresponding code.
+
+---
+
+## See Also
+
+- [`docs/README.md`](README.md) — index of all project documentation
