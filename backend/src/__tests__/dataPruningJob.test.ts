@@ -214,6 +214,69 @@ describe('dataPruningJob — missing path policy: ignore', () => {
   });
 });
 
+// ── missing-path policy: fail ─────────────────────────────────────────────────
+describe('dataPruningJob — missing path policy: fail', () => {
+  it('reports failure on the span when a retention path is missing', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs/missing'],
+    });
+
+    await capturedProcessor!();
+
+    // The job must not silently continue: the span is marked as failed.
+    expect(mockSpan.setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }), // SpanStatusCode.ERROR
+    );
+  });
+
+  it('rejects rather than silently continuing when runDataPruning reports a missing path', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      logsPaths: ['/logs/missing'],
+      analyticsPaths: ['/analytics'],
+    });
+    const missingPathError = new Error('retention path missing: /logs/missing');
+    mockRunDataPruning.mockRejectedValue(missingPathError);
+
+    await expect(capturedProcessor!()).rejects.toThrow('retention path missing');
+
+    expect(mockSpan.recordException).toHaveBeenCalledWith(missingPathError);
+    expect(mockSpan.setStatus).toHaveBeenCalledWith(
+      expect.objectContaining({ code: 2 }), // SpanStatusCode.ERROR
+    );
+  });
+
+  it('sends exactly one alert when the missing-path count reaches the threshold', async () => {
+    mockGetDataRetentionConfig.mockReturnValue({
+      ...baseConfig,
+      missingPathPolicy: 'fail',
+      missingPathAlertThreshold: 2,
+    });
+    mockRunDataPruning.mockResolvedValue({
+      deletedFiles: 0,
+      archivedFiles: 0,
+      scannedFiles: 0,
+      errors: [],
+      missingPaths: ['/logs', '/analytics'],
+    });
+
+    await capturedProcessor!();
+
+    expect(mockSendAlert).toHaveBeenCalledTimes(1);
+  });
+});
+
 // ── missing-path alert threshold ──────────────────────────────────────────────
 describe('dataPruningJob — missing-path alert threshold', () => {
   it('does not send an alert when the missing-path count is below the threshold', async () => {

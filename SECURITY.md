@@ -32,3 +32,9 @@ We take security seriously and will respond to your report within 48-72 hours. W
 ## Disclosure Policy
 
 We follow a coordinated disclosure policy. We ask that you give us a reasonable amount of time to investigate and fix the vulnerability before disclosing it publicly. Once a fix is available, we will publish a security advisory and credit the researcher (if desired).
+
+## Resource Exhaustion Controls
+
+### SSE Ticket Map Cap and TTL Sweep
+
+The SSE ticket store is a bounded in-process structure. It enforces a maximum number of entries (`SSE_TICKET_MAP_CAP`) and expires tickets after a fixed TTL, with a periodic sweep removing expired entries. The default cap and TTL values are configured in the ticket service implementation at [`backend/src/services/SSETicketService.ts`](backend/src/services/SSETicketService.ts) (see also [`backend/src/services/sseTicketService.ts`](backend/src/services/sseTicketService.ts)). The sweep interval timer is unref'd, so it does not keep the process open.

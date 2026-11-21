@@ -596,6 +596,34 @@ describe('Admin force guard (#2061)', () => {
   });
 });
 
+describe('Admin force confirmation guard (#1993)', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  it('rejects POST /admin/migrations/run with force but no confirmation', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true });
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(500);
+    expectErrorShape(res.body);
+    // The guard must short-circuit before the destructive operation runs.
+    expect(migrationService.runMigrations).not.toHaveBeenCalled();
+  });
+
+  it('proceeds with POST /admin/migrations/run when force is confirmed', async () => {
+    const res = await request(app)
+      .post('/admin/migrations/run')
+      .set('x-test-user-id', 'admin-user')
+      .send({ force: true, confirm: true });
+    expect(res.status).toBe(200);
+    expect(migrationService.runMigrations).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('Admin limit parameter validation (#2063)', () => {
   beforeEach(() => {
     RoleStore.assign('admin-user', 'admin');
