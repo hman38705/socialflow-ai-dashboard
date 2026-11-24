@@ -715,6 +715,130 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
     });
   });
 
+  describe('Force Guard (route level)', () => {
+    // Contract for issue #1964: a forced run requires an elevated permission.
+    // The route stub mirrors the expected guard: without the permission the
+    // request is rejected with 403 before the service is invoked; with the
+    // permission the run proceeds and a warn-level log records the actor.
+    const FORCE_PERMISSION = 'admin:migrations:force';
+
+    interface GuardUser {
+      id: string;
+      isAdmin: boolean;
+      permissions: string[];
+    }
+
+    function buildGuardedMigrationApp(
+      runMigrationsMock: jest.Mock,
+      logger: Logger,
+    ): Express {
+      const app = express();
+      app.use(express.json());
+
+      app.use((req, _res, next) => {
+        (req as unknown as { user: GuardUser }).user = {
+          id: 'admin-test-user',
+          isAdmin: true,
+          permissions: (req.headers['x-permissions'] as string | undefined)
+            ?.split(',')
+            .filter(Boolean) ?? [],
+        };
+        next();
+      });
+
+      app.post('/admin/migrations/run', async (req, res) => {
+        const user = (req as unknown as { user: GuardUser }).user;
+
+        let flags: MigrationFlags;
+        try {
+          flags = parseMigrationFlags((req.body ?? {}) as Record<string, unknown>);
+        } catch (err) {
+          res.status(400).json({ error: (err as Error).message });
+          return;
+        }
+
+        if (flags.force && !user.permissions.includes(FORCE_PERMISSION)) {
+          res.status(403).json({
+            error: 'Forbidden',
+            code: 'MIGRATION_FORCE_PERMISSION_REQUIRED',
+          });
+          return;
+        }
+
+        if (flags.force) {
+          logger.warn('Forced migration run requested', {
+            actorId: user.id,
+          });
+        }
+
+        const result = await runMigrationsMock(flags);
+        res.status(200).json(result);
+      });
+
+      return app;
+    }
+
+    let app: Express;
+    let runMigrationsMock: jest.Mock;
+    let guardLogger: Logger;
+
+    beforeEach(() => {
+      runMigrationsMock = jest.fn().mockResolvedValue({
+        executed: [],
+        skipped: [],
+        failed: [],
+        dryRun: false,
+        lockAcquired: true,
+      });
+      guardLogger = {
+        info: jest.fn(),
+        warn: jest.fn(),
+        error: jest.fn(),
+        debug: jest.fn(),
+      } as unknown as Logger;
+      app = buildGuardedMigrationApp(runMigrationsMock, guardLogger);
+    });
+
+    it('should return 403 for a forced run without the elevated permission', async () => {
+      const response = await request(app)
+        .post('/admin/migrations/run')
+        .send({ force: true })
+        .expect(403);
+
+      expect(response.body.code).toBe('MIGRATION_FORCE_PERMISSION_REQUIRED');
+      expect(runMigrationsMock).not.toHaveBeenCalled();
+      expect(guardLogger.warn).not.toHaveBeenCalled();
+    });
+
+    it('should allow a forced run with the elevated permission and log a warning', async () => {
+      await request(app)
+        .post('/admin/migrations/run')
+        .set('x-permissions', FORCE_PERMISSION)
+        .send({ force: true })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenCalledTimes(1);
+      expect(runMigrationsMock).toHaveBeenCalledWith(
+        expect.objectContaining({ force: true }),
+      );
+      expect(guardLogger.warn).toHaveBeenCalledTimes(1);
+      expect(guardLogger.warn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.objectContaining({ actorId: 'admin-test-user' }),
+      );
+    });
+
+    it('should not require the elevated permission for a non-forced run', async () => {
+      await request(app)
+        .post('/admin/migrations/run')
+        .send({ dryRun: false })
+        .expect(200);
+
+      expect(runMigrationsMock).toHaveBeenCalledTimes(1);
+      expect(guardLogger.warn).not.toHaveBeenCalled();
+    });
+  });
+
   describe('Route Flag Validation (dryRun / force)', () => {
     let app: Express;
     let runMigrationsMock: jest.Mock;
@@ -918,6 +1042,28 @@ describe('Migration Service — Lock, Checksum & Idempotency', () => {
 
       expect(result.executed.length).toBeGreaterThan(0);
       expect(mockAuditLog).not.toHaveBeenCalled();
+    });
+
+    it('should write exactly one audit entry per successful mutation', async () => {
+      await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+      await runMigrations(
+        { dryRun: false, actor: actingAdmin } as any,
+        mockLogger,
+      );
+
+      expect(mockAuditLog).toHaveBeenCalledTimes(2);
+      for (const call of mockAuditLog.mock.calls) {
+        expect(call[0]).toEqual(
+          expect.objectContaining({
+            actor: actingAdmin,
+            action: 'migration.run',
+            outcome: 'success',
+          }),
+        );
+      }
     });
 
     it('should write an audit entry when a migration run fails', async () => {

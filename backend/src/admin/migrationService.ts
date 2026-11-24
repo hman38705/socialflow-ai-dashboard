@@ -3,6 +3,8 @@ import crypto from 'crypto';
 import { getConfiguredQueueNames } from '../config/runtime';
 import { redis } from '../lib/redis';
 import { Logger } from '../lib/logger';
+import { auditLogger } from '../lib/audit';
+import { RoleStore } from '../lib/roleStore';
 import {
   ADMIN_MIGRATIONS_SET_KEY,
   KNOWN_QUEUES_SET_KEY,
@@ -47,7 +49,12 @@ export interface RunMigrationsOptions {
   name?: string;
   dryRun?: boolean;
   force?: boolean;
+  actor?: string;
+  confirmationToken?: string;
 }
+
+export const MIGRATION_FORCE_PERMISSION = 'migrations:force';
+export const MIGRATION_FORCE_CONFIRMATION_TOKEN = 'FORCE_MIGRATION';
 
 export interface RunMigrationsResult {
   executed: string[];
@@ -56,6 +63,7 @@ export interface RunMigrationsResult {
   dryRun: boolean;
   lockAcquired: boolean;
   errors?: Record<string, string>;
+  forbidden?: boolean;
 }
 
 // Calculate checksum of a migration function to detect modifications
@@ -228,17 +236,75 @@ export const runMigrations = async (
 ): Promise<RunMigrationsResult> => {
   const errors: Record<string, string> = {};
 
+  // Guard forced runs: require elevated permission or explicit confirmation token
+  if (options.force) {
+    const hasPermission = Boolean(
+      options.actor && RoleStore.hasPermission(options.actor, MIGRATION_FORCE_PERMISSION),
+    );
+    const hasConfirmation =
+      options.confirmationToken === MIGRATION_FORCE_CONFIRMATION_TOKEN;
+
+    if (!hasPermission && !hasConfirmation) {
+      logger.warn('Forced migration run denied', {
+        actor: options.actor,
+        migration: options.name,
+      });
+      await auditLogger({
+        action: 'migration.run',
+        actorId: options.actor,
+        resourceType: 'migration',
+        resourceId: options.name,
+        metadata: {
+          force: true,
+          dryRun: Boolean(options.dryRun),
+          executed: [],
+          skipped: [],
+          failed: [],
+          outcome: 'forbidden',
+        },
+      });
+      return {
+        executed: [],
+        skipped: [],
+        failed: [],
+        dryRun: Boolean(options.dryRun),
+        lockAcquired: false,
+        forbidden: true,
+      };
+    }
+
+    logger.warn('Forced migration run authorized', {
+      actor: options.actor,
+      migration: options.name,
+    });
+  }
+
   // Attempt to acquire lock
   const lockAcquired = await acquireMigrationLock(redis, logger);
   if (!lockAcquired && !options.dryRun) {
     logger.error('Could not acquire migration lock - another migration may be in progress');
-    return {
+    const result: RunMigrationsResult = {
       executed: [],
       skipped: [],
       failed: [],
       dryRun: false,
       lockAcquired: false,
     };
+    await auditLogger({
+      action: 'migration.run',
+      actorId: options.actor,
+      resourceType: 'migration',
+      resourceId: options.name,
+      metadata: {
+        force: Boolean(options.force),
+        dryRun: false,
+        executed: result.executed,
+        skipped: result.skipped,
+        failed: result.failed,
+        outcome: 'lock_unavailable',
+      },
+    });
+    return result;
   }
 
   try {
@@ -251,13 +317,28 @@ export const runMigrations = async (
     );
 
     if (pending.length === 0) {
-      return {
+      const result: RunMigrationsResult = {
         executed: [],
         skipped: matchingMigrations.map((migration) => migration.name),
         failed: [],
         dryRun: Boolean(options.dryRun),
         lockAcquired: true,
       };
+      await auditLogger({
+        action: 'migration.run',
+        actorId: options.actor,
+        resourceType: 'migration',
+        resourceId: options.name,
+        metadata: {
+          force: Boolean(options.force),
+          dryRun: Boolean(options.dryRun),
+          executed: result.executed,
+          skipped: result.skipped,
+          failed: result.failed,
+          outcome: 'noop',
+        },
+      });
+      return result;
     }
 
     const executed: string[] = [];
@@ -347,7 +428,7 @@ export const runMigrations = async (
       }
     }
 
-    return {
+    const result: RunMigrationsResult = {
       executed,
       skipped: matchingMigrations
         .filter((migration) => applied.has(migration.name) && !options.force)
@@ -357,6 +438,23 @@ export const runMigrations = async (
       lockAcquired: true,
       errors: Object.keys(errors).length > 0 ? errors : undefined,
     };
+
+    await auditLogger({
+      action: 'migration.run',
+      actorId: options.actor,
+      resourceType: 'migration',
+      resourceId: options.name,
+      metadata: {
+        force: Boolean(options.force),
+        dryRun: Boolean(options.dryRun),
+        executed: result.executed,
+        skipped: result.skipped,
+        failed: result.failed,
+        outcome: failed.length > 0 ? 'failure' : 'success',
+      },
+    });
+
+    return result;
   } finally {
     if (!options.dryRun) {
       await releaseMigrationLock(redis, logger);
@@ -367,19 +465,41 @@ export const runMigrations = async (
 export const rollbackMigration = async (
   migrationName: string,
   logger: Logger,
+  actor?: string,
 ): Promise<{ success: boolean; error?: string }> => {
   try {
     const migration = migrations.find((m) => m.name === migrationName);
     if (!migration) {
+      await auditLogger({
+        action: 'migration.rollback',
+        actorId: actor,
+        resourceType: 'migration',
+        resourceId: migrationName,
+        metadata: { outcome: 'failure', error: 'Migration not found' },
+      });
       return { success: false, error: 'Migration not found' };
     }
 
     if (!migration.rollback) {
+      await auditLogger({
+        action: 'migration.rollback',
+        actorId: actor,
+        resourceType: 'migration',
+        resourceId: migrationName,
+        metadata: { outcome: 'failure', error: 'Migration does not support rollback' },
+      });
       return { success: false, error: 'Migration does not support rollback' };
     }
 
     const applied = await redis.sismember(ADMIN_MIGRATIONS_SET_KEY, migrationName);
     if (!applied) {
+      await auditLogger({
+        action: 'migration.rollback',
+        actorId: actor,
+        resourceType: 'migration',
+        resourceId: migrationName,
+        metadata: { outcome: 'failure', error: 'Migration not applied' },
+      });
       return { success: false, error: 'Migration not applied' };
     }
 
@@ -388,10 +508,24 @@ export const rollbackMigration = async (
     await redis.hdel(ADMIN_MIGRATIONS_METADATA_KEY, migrationName);
 
     logger.info('Migration rolled back successfully', { migration: migrationName });
+    await auditLogger({
+      action: 'migration.rollback',
+      actorId: actor,
+      resourceType: 'migration',
+      resourceId: migrationName,
+      metadata: { outcome: 'success' },
+    });
     return { success: true };
   } catch (error) {
     const errorMsg = error instanceof Error ? error.message : String(error);
     logger.error('Rollback failed', { migration: migrationName, error: errorMsg });
+    await auditLogger({
+      action: 'migration.rollback',
+      actorId: actor,
+      resourceType: 'migration',
+      resourceId: migrationName,
+      metadata: { outcome: 'failure', error: errorMsg },
+    });
     return { success: false, error: errorMsg };
   }
 };

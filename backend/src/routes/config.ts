@@ -2,6 +2,7 @@ import { Router, Request, Response } from 'express';
 import { getDynamicConfigService, ConfigType, ConfigKey } from '../services/DynamicConfigService';
 import { authMiddleware } from '../middleware/authMiddleware';
 import { checkPermission } from '../middleware/checkPermission';
+import { auditLogger } from '../services/auditLogger';
 
 const router = Router();
 
@@ -75,29 +76,64 @@ router.post('/refresh', authMiddleware, checkPermission('settings:manage'), asyn
 router.put('/:key', authMiddleware, checkPermission('settings:manage'), async (req: Request, res: Response) => {
   const { key } = req.params;
   const { value, type, description } = req.body;
+  const actorId = req.user?.id;
+  const configType: ConfigType = type === undefined ? 'string' : type;
+
+  const recordFailure = async (message: string) => {
+    try {
+      await auditLogger.log({
+        actorId,
+        action: 'admin:config:update',
+        resourceType: 'config',
+        resourceId: key,
+        outcome: 'failure',
+        metadata: { key, type: configType, error: message },
+      });
+    } catch {
+      // Audit failures must not mask the original error response.
+    }
+  };
 
   if (!KEY_PATTERN.test(key) || !ALLOWED_KEYS.has(key)) {
-    return res.status(400).json({ success: false, message: 'Invalid or unsupported config key' });
+    const message = 'Invalid or unsupported config key';
+    await recordFailure(message);
+    return res.status(400).json({ success: false, message });
   }
   if (value === undefined) {
-    return res.status(400).json({ success: false, message: 'Value is required' });
+    const message = 'Value is required';
+    await recordFailure(message);
+    return res.status(400).json({ success: false, message });
   }
-  const configType: ConfigType = type === undefined ? 'string' : type;
   if (!CONFIG_TYPES.includes(configType)) {
-    return res.status(400).json({ success: false, message: 'Invalid config type' });
+    const message = 'Invalid config type';
+    await recordFailure(message);
+    return res.status(400).json({ success: false, message });
   }
   if (!validateValue(value, configType)) {
-    return res.status(400).json({ success: false, message: `Value does not match type "${configType}"` });
+    const message = `Value does not match type "${configType}"`;
+    await recordFailure(message);
+    return res.status(400).json({ success: false, message });
   }
   if (description !== undefined && (typeof description !== 'string' || description.length > 500)) {
-    return res.status(400).json({ success: false, message: 'Invalid description' });
+    const message = 'Invalid description';
+    await recordFailure(message);
+    return res.status(400).json({ success: false, message });
   }
 
   try {
     const svc = await getDynamicConfigService();
     await svc.set(key, value, configType, description);
+    await auditLogger.log({
+      actorId,
+      action: 'admin:config:update',
+      resourceType: 'config',
+      resourceId: key,
+      outcome: 'success',
+      metadata: { key, type: configType },
+    });
     res.json({ success: true, message: `Configuration "${key}" updated successfully` });
   } catch (error) {
+    await recordFailure(error instanceof Error ? error.message : 'Internal server error');
     res.status(500).json({ success: false, message: 'Internal server error' });
   }
 });
