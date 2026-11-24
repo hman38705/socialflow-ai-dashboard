@@ -1,7 +1,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { z } from 'zod';
 import { validate } from '../middleware/validate';
-import { adminNumericSchema } from '../admin/constants';
+import {
+  adminNumericSchema,
+  adminLimitSchema,
+  adminBatchSizeSchema,
+  adminDryRunSchema,
+  adminForceSchema,
+} from '../admin/constants';
 
 function makeReq(body?: unknown, query?: unknown, params?: unknown): Request {
   return {
@@ -234,9 +240,12 @@ describe('validate middleware', () => {
   });
 
   describe('admin numeric fields (limit, batchSize, dryRun, force)', () => {
-    const numericFields = ['limit', 'batchSize'] as const;
+    const numericFields = [
+      { field: 'limit', schema: adminLimitSchema },
+      { field: 'batchSize', schema: adminBatchSizeSchema },
+    ] as const;
 
-    const numericAccepted: { field: (typeof numericFields)[number]; input: unknown; expected: number }[] = [
+    const numericAccepted: { field: string; input: unknown; expected: number }[] = [
       { field: 'limit', input: '50', expected: 50 },
       { field: 'limit', input: 50, expected: 50 },
       { field: 'limit', input: '0', expected: 0 },
@@ -250,18 +259,18 @@ describe('validate middleware', () => {
     it.each(numericAccepted)(
       'accepts $field=$input and coerces it to $expected',
       ({ field, input, expected }) => {
-        const schema = z.object({ [field]: adminNumericSchema });
-        const result = schema.safeParse({ [field]: input });
+        const { schema } = numericFields.find((f) => f.field === field)!;
+        const result = schema.safeParse(input);
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect((result.data as Record<string, unknown>)[field]).toBe(expected);
-          expect(typeof (result.data as Record<string, unknown>)[field]).toBe('number');
+          expect(result.data).toBe(expected);
+          expect(typeof result.data).toBe('number');
         }
       }
     );
 
-    const numericRejected: { field: (typeof numericFields)[number]; description: string; input: unknown }[] = [
+    const numericRejected: { field: string; description: string; input: unknown }[] = [
       { field: 'limit', description: 'a negative value', input: '-1' },
       { field: 'limit', description: 'a negative number', input: -1 },
       { field: 'limit', description: 'a value above the maximum', input: '1000001' },
@@ -277,20 +286,22 @@ describe('validate middleware', () => {
     ];
 
     it.each(numericRejected)('rejects $field with $description', ({ field, input }) => {
-      const schema = z.object({ [field]: adminNumericSchema });
-      const result = schema.safeParse({ [field]: input });
+      const { schema } = numericFields.find((f) => f.field === field)!;
+      const result = schema.safeParse(input);
 
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(Array.isArray(result.error.errors)).toBe(true);
         expect(result.error.errors.length).toBeGreaterThan(0);
-        expect(result.error.errors.some((e) => e.path[0] === field)).toBe(true);
       }
     });
 
-    const booleanFields = ['dryRun', 'force'] as const;
+    const booleanFields = [
+      { field: 'dryRun', schema: adminDryRunSchema },
+      { field: 'force', schema: adminForceSchema },
+    ] as const;
 
-    const booleanAccepted: { field: (typeof booleanFields)[number]; input: unknown; expected: boolean }[] = [
+    const booleanAccepted: { field: string; input: unknown; expected: boolean }[] = [
       { field: 'dryRun', input: true, expected: true },
       { field: 'dryRun', input: false, expected: false },
       { field: 'dryRun', input: 'true', expected: true },
@@ -304,18 +315,18 @@ describe('validate middleware', () => {
     it.each(booleanAccepted)(
       'accepts $field=$input and coerces it to $expected',
       ({ field, input, expected }) => {
-        const schema = z.object({ [field]: adminNumericSchema });
-        const result = schema.safeParse({ [field]: input });
+        const { schema } = booleanFields.find((f) => f.field === field)!;
+        const result = schema.safeParse(input);
 
         expect(result.success).toBe(true);
         if (result.success) {
-          expect((result.data as Record<string, unknown>)[field]).toBe(expected);
-          expect(typeof (result.data as Record<string, unknown>)[field]).toBe('boolean');
+          expect(result.data).toBe(expected);
+          expect(typeof result.data).toBe('boolean');
         }
       }
     );
 
-    const booleanRejected: { field: (typeof booleanFields)[number]; description: string; input: unknown }[] = [
+    const booleanRejected: { field: string; description: string; input: unknown }[] = [
       { field: 'dryRun', description: 'the string "yes"', input: 'yes' },
       { field: 'dryRun', description: 'the string "no"', input: 'no' },
       { field: 'dryRun', description: 'a numeric string', input: '1' },
@@ -327,19 +338,18 @@ describe('validate middleware', () => {
     ];
 
     it.each(booleanRejected)('rejects $field with $description', ({ field, input }) => {
-      const schema = z.object({ [field]: adminNumericSchema });
-      const result = schema.safeParse({ [field]: input });
+      const { schema } = booleanFields.find((f) => f.field === field)!;
+      const result = schema.safeParse(input);
 
       expect(result.success).toBe(false);
       if (!result.success) {
         expect(Array.isArray(result.error.errors)).toBe(true);
         expect(result.error.errors.length).toBeGreaterThan(0);
-        expect(result.error.errors.some((e) => e.path[0] === field)).toBe(true);
       }
     });
 
     it('rejects "yes" for dryRun and force through the validate middleware with a 422 error shape', () => {
-      const schema = z.object({ dryRun: adminNumericSchema, force: adminNumericSchema });
+      const schema = z.object({ dryRun: adminDryRunSchema, force: adminForceSchema });
       const mw = validate(schema);
       const req = makeReq({ dryRun: 'yes', force: 'yes' });
       const res = makeRes();

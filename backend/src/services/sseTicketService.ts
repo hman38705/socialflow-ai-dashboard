@@ -21,19 +21,33 @@ const DEFAULT_SWEEP_INTERVAL_MS = 10_000;
 export class SseTicketService {
   private readonly tickets = new Map<string, SseTicket>();
   private readonly ttlMs: number;
-  private readonly sweepInterval: NodeJS.Timeout;
+  private readonly sweepIntervalMs: number;
+  private sweepInterval: NodeJS.Timeout | undefined;
 
   constructor(ttlMs: number = DEFAULT_TTL_MS, sweepIntervalMs: number = DEFAULT_SWEEP_INTERVAL_MS) {
     this.ttlMs = ttlMs;
-    this.sweepInterval = setInterval(() => this.sweep(), sweepIntervalMs);
+    this.sweepIntervalMs = sweepIntervalMs;
+    this.start();
+  }
+
+  /**
+   * Starts the sweep timer. Idempotent: repeated calls (or repeated service
+   * instantiation sharing this instance) will not create a second interval.
+   */
+  start(): void {
+    if (this.sweepInterval) {
+      return;
+    }
+    this.sweepInterval = setInterval(() => this.sweep(), this.sweepIntervalMs);
     // Never keep the process alive just for the sweep timer.
     this.sweepInterval.unref();
   }
 
   /** Exposed for tests so they can assert the timer does not hold the loop. */
-  getSweepInterval(): NodeJS.Timeout {
+  getSweepInterval(): NodeJS.Timeout | undefined {
     return this.sweepInterval;
   }
+=======
 
   issue(userId: string): string {
     const ticket = randomBytes(24).toString('hex');
@@ -67,6 +81,9 @@ export class SseTicketService {
   }
 
   stop(): void {
-    clearInterval(this.sweepInterval);
+    if (this.sweepInterval) {
+      clearInterval(this.sweepInterval);
+      this.sweepInterval = undefined;
+    }
   }
 }
