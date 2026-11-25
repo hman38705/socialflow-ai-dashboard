@@ -376,4 +376,138 @@ describe('audit middleware', () => {
       }
     });
   });
+
+  describe('admin mutation audit coverage', () => {
+    // Admin authentication fixture: an authenticated admin actor, mirroring the
+    // admin request setup used by the other admin tests in the suite.
+    function makeAdminReq(overrides: Partial<AuthRequest> = {}): AuthRequest {
+      return makeReq({
+        user: { id: 'admin-1', role: 'admin' } as any,
+        ...overrides,
+      });
+    }
+
+    interface MutationCase {
+      name: string;
+      action: string;
+      resourceType: string;
+      resourceId: string;
+      metadata: () => Record<string, unknown>;
+    }
+
+    const mutations: MutationCase[] = [
+      {
+        name: 'cache clear',
+        action: 'admin:cache:clear',
+        resourceType: 'cache',
+        resourceId: 'cache-1',
+        metadata: () => ({ scope: 'all' }),
+      },
+      {
+        name: 'job retry',
+        action: 'admin:job:retry',
+        resourceType: 'job',
+        resourceId: 'job-1',
+        metadata: () => ({ jobId: 'job-1' }),
+      },
+      {
+        name: 'migration run',
+        action: 'admin:migration:run',
+        resourceType: 'migration',
+        resourceId: 'migration-1',
+        metadata: () => ({ migrationId: 'migration-1' }),
+      },
+      {
+        name: 'migration rollback',
+        action: 'admin:migration:rollback',
+        resourceType: 'migration',
+        resourceId: 'migration-2',
+        metadata: () => ({ migrationId: 'migration-2' }),
+      },
+      {
+        name: 'config PUT',
+        action: 'admin:config:update',
+        resourceType: 'config',
+        resourceId: 'config-key-1',
+        metadata: () => ({ key: 'config-key-1' }),
+      },
+    ];
+
+    describe.each(mutations)('$name', (mutation) => {
+      it('writes exactly one audit entry on success with actor, action and target', () => {
+        const mw = audit(
+          mutation.action,
+          mutation.resourceType,
+          () => mutation.resourceId,
+          mutation.metadata,
+        );
+        const req = makeAdminReq();
+        const res = makeRes(200);
+
+        mw(req, res as Response, jest.fn() as NextFunction);
+        res.emit('finish');
+
+        expect(mockLog).toHaveBeenCalledTimes(1);
+        const logged = mockLog.mock.calls[0][0];
+        expect(logged).toMatchObject({
+          actorId: 'admin-1',
+          action: mutation.action,
+          resourceType: mutation.resourceType,
+          resourceId: mutation.resourceId,
+        });
+        expect(logged.metadata).toMatchObject(mutation.metadata());
+      });
+
+      it('takes the actor id from the authenticated request, not the body', () => {
+        const mw = audit(
+          mutation.action,
+          mutation.resourceType,
+          () => mutation.resourceId,
+          mutation.metadata,
+        );
+        const req = makeAdminReq({
+          body: { actorId: 'spoofed-actor', userId: 'spoofed-actor' },
+        } as Partial<AuthRequest>);
+        const res = makeRes(200);
+
+        mw(req, res as Response, jest.fn() as NextFunction);
+        res.emit('finish');
+
+        expect(mockLog).toHaveBeenCalledTimes(1);
+        expect(mockLog.mock.calls[0][0].actorId).toBe('admin-1');
+      });
+
+      it('does not write an audit entry when the mutation fails', () => {
+        const mw = audit(
+          mutation.action,
+          mutation.resourceType,
+          () => mutation.resourceId,
+          mutation.metadata,
+        );
+        const req = makeAdminReq();
+        const res = makeRes(500);
+
+        mw(req, res as Response, jest.fn() as NextFunction);
+        res.emit('finish');
+
+        expect(mockLog).not.toHaveBeenCalled();
+      });
+
+      it('does not write an audit entry when the mutation is rejected with 4xx', () => {
+        const mw = audit(
+          mutation.action,
+          mutation.resourceType,
+          () => mutation.resourceId,
+          mutation.metadata,
+        );
+        const req = makeAdminReq();
+        const res = makeRes(403);
+
+        mw(req, res as Response, jest.fn() as NextFunction);
+        res.emit('finish');
+
+        expect(mockLog).not.toHaveBeenCalled();
+      });
+    });
+  });
 });

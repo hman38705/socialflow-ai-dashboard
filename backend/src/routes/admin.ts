@@ -7,6 +7,7 @@ import { BadRequestError, ErrorCodes } from '../lib/errors';
 import { getDiscoveredQueueNames, retryFailedJobs } from '../admin/jobAdminService';
 import { clearCache } from '../admin/cacheAdminService';
 import { listMigrations, runMigrations, rollbackMigration } from '../admin/migrationService';
+import { RoleStore } from '../lib/roleStore';
 
 const router = Router();
 const logger = createLogger('admin-routes');
@@ -59,9 +60,10 @@ router.get('/jobs/queues', async (_req, res) => {
 });
 
 router.post('/jobs/retry', async (req, res, next) => {
+  const actorId = req.user?.id;
   try {
     const { queueName, limit, dryRun, jobId } = parseBody(retryJobsBodySchema, req.body);
-    const result = await retryFailedJobs({ queueName, limit, dryRun, jobId }, logger);
+    const result = await retryFailedJobs({ queueName, limit, dryRun, jobId, actorId }, logger);
     res.json(result);
   } catch (error) {
     if (error instanceof BadRequestError) {
@@ -77,6 +79,7 @@ const CACHE_PREFIX = 'cache:';
 const RESERVED_PREFIXES = ['bull:', 'lock:', 'jwt:', 'oauth:'];
 
 router.post('/cache/clear', async (req, res, next) => {
+  const actorId = req.user?.id;
   try {
     const { pattern, batchSize, dryRun } = parseBody(clearCacheBodySchema, req.body);
     const scoped = pattern.startsWith(CACHE_PREFIX) ? pattern : `${CACHE_PREFIX}${pattern}`;
@@ -84,7 +87,7 @@ router.post('/cache/clear', async (req, res, next) => {
     if (!suffix.replace(/[*?[\]^-]/g, '') || RESERVED_PREFIXES.some((p) => suffix.startsWith(p))) {
       return res.status(400).json({ error: 'pattern is too broad or targets a reserved prefix' });
     }
-    const result = await clearCache({ pattern: scoped, batchSize, dryRun }, logger);
+    const result = await clearCache({ pattern: scoped, batchSize, dryRun, actorId }, logger);
     res.json(result);
   } catch (error) {
     if (error instanceof BadRequestError) {
@@ -106,9 +109,19 @@ router.get('/migrations', async (_req, res) => {
 });
 
 router.post('/migrations/run', async (req, res, next) => {
+  const actorId = req.user?.id;
   try {
     const { name, dryRun, force } = parseBody(runMigrationsBodySchema, req.body);
-    const result = await runMigrations({ name, dryRun, force }, logger);
+    if (force) {
+      const allowed = await RoleStore.hasPermission(actorId, 'migrations:force');
+      if (!allowed) {
+        return res.status(403).json({ error: 'Forbidden: force requires elevated permission' });
+      }
+    }
+    const result = await runMigrations({ name, dryRun, force, actorId }, logger);
+    if (result.forbidden) {
+      return res.status(403).json({ error: 'Forbidden: force requires elevated permission' });
+    }
     res.json(result);
   } catch (error) {
     if (error instanceof BadRequestError) {
@@ -119,8 +132,9 @@ router.post('/migrations/run', async (req, res, next) => {
 });
 
 router.post('/migrations/:name/rollback', async (req, res) => {
+  const actorId = req.user?.id;
   try {
-    const result = await rollbackMigration(req.params.name, logger);
+    const result = await rollbackMigration(req.params.name, logger, actorId);
     if (!result.success) {
       return res.status(400).json(result);
     }

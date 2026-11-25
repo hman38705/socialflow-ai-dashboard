@@ -1,5 +1,6 @@
 import { redis } from '../lib/redis';
 import { Logger } from '../lib/logger';
+import { auditLogger } from '../services/AuditLogger';
 
 export interface CacheStats {
   totalKeys: number;
@@ -81,61 +82,96 @@ export const clearCache = async (
   options: ClearCacheOptions,
   logger: Logger,
 ): Promise<ClearCacheResult> => {
-  if (!isAllowedCachePattern(options.pattern)) {
-    logger.warn('Rejected disallowed cache clear pattern', {
-      pattern: options.pattern,
-    });
-    throw new DisallowedCachePatternError(options.pattern);
-  }
-
+  const actor = options.actor ?? 'unknown';
   const dryRun = Boolean(options.dryRun);
-  logger.info('Scanning Redis keys for cache clear', {
-    pattern: options.pattern,
-    batchSize: options.batchSize,
-    dryRun,
-  });
 
-  let cursor = '0';
-  let matchedKeys = 0;
-  let deletedKeys = 0;
-
-  do {
-    const [nextCursor, batch] = await redis.scan(
-      cursor,
-      'MATCH',
-      options.pattern,
-      'COUNT',
-      options.batchSize,
-    );
-    cursor = nextCursor;
-    matchedKeys += batch.length;
-
-    if (!dryRun && batch.length > 0) {
-      deletedKeys += await redis.unlink(...batch);
+  try {
+    if (!isAllowedCachePattern(options.pattern)) {
+      logger.warn('Rejected disallowed cache clear pattern', {
+        pattern: options.pattern,
+      });
+      throw new DisallowedCachePatternError(options.pattern);
     }
-  } while (cursor !== '0' && matchedKeys < MAX_KEYS_PER_CALL);
 
-  if (cursor !== '0') {
-    logger.warn('Cache clear stopped at per-call key limit; run again to continue', {
+    logger.info('Scanning Redis keys for cache clear', {
       pattern: options.pattern,
-      limit: MAX_KEYS_PER_CALL,
+      batchSize: options.batchSize,
+      dryRun,
     });
+
+    let cursor = '0';
+    let matchedKeys = 0;
+    let deletedKeys = 0;
+
+    do {
+      const [nextCursor, batch] = await redis.scan(
+        cursor,
+        'MATCH',
+        options.pattern,
+        'COUNT',
+        options.batchSize,
+      );
+      cursor = nextCursor;
+      matchedKeys += batch.length;
+
+      if (!dryRun && batch.length > 0) {
+        deletedKeys += await redis.unlink(...batch);
+      }
+    } while (cursor !== '0' && matchedKeys < MAX_KEYS_PER_CALL);
+
+    if (cursor !== '0') {
+      logger.warn('Cache clear stopped at per-call key limit; run again to continue', {
+        pattern: options.pattern,
+        limit: MAX_KEYS_PER_CALL,
+      });
+    }
+
+    logger.info('Cache clear completed', {
+      pattern: options.pattern,
+      matchedKeys,
+      deletedKeys,
+      dryRun,
+    });
+
+    writeCacheClearAudit(logger, {
+      actor,
+      pattern: options.pattern,
+      dryRun,
+    });
+
+    await auditLogger.log({
+      action: 'admin:cache:clear',
+      actorId: actor,
+      resourceType: 'cache',
+      resourceId: options.pattern,
+      outcome: 'success',
+      metadata: {
+        pattern: options.pattern,
+        dryRun,
+        matchedKeys,
+        deletedKeys,
+      },
+    });
+
+    return { pattern: options.pattern, matchedKeys, deletedKeys, dryRun };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+
+    await auditLogger.log({
+      action: 'admin:cache:clear',
+      actorId: actor,
+      resourceType: 'cache',
+      resourceId: options.pattern,
+      outcome: 'failure',
+      metadata: {
+        pattern: options.pattern,
+        dryRun,
+        error: message,
+      },
+    });
+
+    throw error;
   }
-
-  logger.info('Cache clear completed', {
-    pattern: options.pattern,
-    matchedKeys,
-    deletedKeys,
-    dryRun,
-  });
-
-  writeCacheClearAudit(logger, {
-    actor: options.actor ?? 'unknown',
-    pattern: options.pattern,
-    dryRun,
-  });
-
-  return { pattern: options.pattern, matchedKeys, deletedKeys, dryRun };
 };
 
 export const getCacheStats = async (logger: Logger): Promise<CacheStats> => {

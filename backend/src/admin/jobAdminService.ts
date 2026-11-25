@@ -2,6 +2,7 @@ import { Queue } from 'bullmq';
 import { getConfiguredQueueNames, getRedisConnection } from '../config/runtime';
 import { redis } from '../lib/redis';
 import { Logger } from '../lib/logger';
+import { auditLogger } from '../lib/audit';
 import { KNOWN_QUEUES_SET_KEY } from './constants';
 
 export interface RetryFailedJobsOptions {
@@ -9,6 +10,7 @@ export interface RetryFailedJobsOptions {
   limit: number;
   dryRun?: boolean;
   jobId?: string;
+  actor?: string;
 }
 
 export interface RetryFailedJobsResult {
@@ -31,6 +33,7 @@ export const retryFailedJobs = async (
   logger: Logger,
 ): Promise<RetryFailedJobsResult> => {
   const queue = new Queue(options.queueName, { connection: getRedisConnection() });
+  const resourceId = options.jobId ?? options.queueName;
 
   try {
     const jobs = options.jobId
@@ -50,13 +53,31 @@ export const retryFailedJobs = async (
     });
 
     if (options.dryRun) {
-      return {
+      const dryRunResult: RetryFailedJobsResult = {
         queueName: options.queueName,
         targetedJobs: failedJobs.length,
         retriedJobs: 0,
         failedRetries: [],
         dryRun: true,
       };
+
+      await auditLogger({
+        actorId: options.actor,
+        action: 'admin:job:retry',
+        resourceType: 'job',
+        resourceId,
+        outcome: 'success',
+        metadata: {
+          queueName: options.queueName,
+          jobId: options.jobId,
+          targetedJobs: dryRunResult.targetedJobs,
+          retriedJobs: dryRunResult.retriedJobs,
+          failedRetries: dryRunResult.failedRetries.length,
+          dryRun: true,
+        },
+      });
+
+      return dryRunResult;
     }
 
     let retriedJobs = 0;
@@ -81,13 +102,47 @@ export const retryFailedJobs = async (
       failedRetries: failedRetries.length,
     });
 
-    return {
+    const result: RetryFailedJobsResult = {
       queueName: options.queueName,
       targetedJobs: failedJobs.length,
       retriedJobs,
       failedRetries,
       dryRun: false,
     };
+
+    await auditLogger({
+      actorId: options.actor,
+      action: 'admin:job:retry',
+      resourceType: 'job',
+      resourceId,
+      outcome: 'success',
+      metadata: {
+        queueName: options.queueName,
+        jobId: options.jobId,
+        targetedJobs: result.targetedJobs,
+        retriedJobs: result.retriedJobs,
+        failedRetries: result.failedRetries.length,
+        dryRun: false,
+      },
+    });
+
+    return result;
+  } catch (error) {
+    await auditLogger({
+      actorId: options.actor,
+      action: 'admin:job:retry',
+      resourceType: 'job',
+      resourceId,
+      outcome: 'failure',
+      metadata: {
+        queueName: options.queueName,
+        jobId: options.jobId,
+        dryRun: Boolean(options.dryRun),
+        error: error instanceof Error ? error.message : String(error),
+      },
+    });
+
+    throw error;
   } finally {
     await queue.close();
   }
