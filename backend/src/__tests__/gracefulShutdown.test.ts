@@ -130,6 +130,49 @@ describe('sseTicketService — sweep interval', () => {
     }
   });
 
+  it('does not create a duplicate interval when start() is called repeatedly', () => {
+    jest.useRealTimers();
+    const setIntervalSpy = jest.spyOn(global, 'setInterval');
+
+    try {
+      (sseTicketService as any).stop?.();
+      setIntervalSpy.mockClear();
+
+      sseTicketService.start();
+      const firstHandle = (sseTicketService as any).sweepInterval as NodeJS.Timeout | undefined;
+      expect(firstHandle).toBeDefined();
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+
+      // Repeated start() must not create another interval
+      sseTicketService.start();
+      sseTicketService.start();
+
+      expect(setIntervalSpy).toHaveBeenCalledTimes(1);
+      expect((sseTicketService as any).sweepInterval).toBe(firstHandle);
+    } finally {
+      (sseTicketService as any).stop?.();
+      setIntervalSpy.mockRestore();
+    }
+  });
+
+  it('allows the process to exit without an explicit clearInterval', () => {
+    jest.useRealTimers();
+
+    // Fresh interval created by start(); never cleared in this test
+    (sseTicketService as any).stop?.();
+    sseTicketService.start();
+
+    const handle = (sseTicketService as any).sweepInterval as NodeJS.Timeout | undefined;
+    expect(handle).toBeDefined();
+
+    // An unref'd timer does not keep the event loop alive, so the process
+    // can exit on its own without anyone calling clearInterval.
+    expect(handle!.hasRef()).toBe(false);
+
+    // Clean up so the suite does not leak the timer into other tests
+    (sseTicketService as any).stop?.();
+  });
+
   it('clears the sweep interval on shutdown so no timer remains after close', () => {
     jest.useRealTimers();
     const clearIntervalSpy = jest.spyOn(global, 'clearInterval');
