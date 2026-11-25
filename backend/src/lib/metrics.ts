@@ -13,6 +13,12 @@ export const sseConnections = new Gauge({
   registers: [register],
 });
 
+export const sseTicketsActive = new Gauge({
+  name: 'sse_tickets_active',
+  help: 'Current number of live SSE tickets',
+  registers: [register],
+});
+
 /**
  * Event loop lag gauge — sampled every 500 ms.
  * Measures the delta between when a setTimeout(fn, 0) was scheduled and when it fired.

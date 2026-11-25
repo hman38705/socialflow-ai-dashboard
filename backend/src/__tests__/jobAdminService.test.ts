@@ -4,6 +4,7 @@ import { getConfiguredQueueNames } from '../config/runtime';
 import { MIN_BATCH_SIZE, MAX_BATCH_SIZE } from '../admin/constants';
 import { ValidationError } from '../lib/errors';
 import { Queue } from 'bullmq';
+import { adminUserFixture, jobFixture } from './fixtures';
 
 jest.mock('../config/runtime', () => ({
   getConfiguredQueueNames: jest.fn(),
@@ -109,7 +110,11 @@ describe('jobAdminService', () => {
 
   it('should write an audit log entry when an admin retries a job', async () => {
     const retryMock = jest.fn().mockResolvedValue(undefined);
-    const getJobMock = jest.fn().mockResolvedValue({ failedReason: 'failed', retry: retryMock, id: 'job-1' });
+    const getJobMock = jest.fn().mockResolvedValue({
+      ...jobFixture,
+      failedReason: 'failed',
+      retry: retryMock,
+    });
     const closeMock = jest.fn().mockResolvedValue(undefined);
     QueueMock.mockImplementation(() => ({
       getJob: getJobMock,
@@ -117,18 +122,64 @@ describe('jobAdminService', () => {
     }));
 
     await retryFailedJobs(
-      { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 'job-1', actor: 'admin-user' },
+      {
+        queueName: 'test-queue',
+        limit: 1,
+        dryRun: false,
+        jobId: jobFixture.id,
+        actor: adminUserFixture.id,
+      },
       mockLogger,
     );
 
+    expect(retryMock).toHaveBeenCalled();
     expect(mockAuditLog).toHaveBeenCalledTimes(1);
     expect(mockAuditLog).toHaveBeenCalledWith(
       expect.objectContaining({
-        actor: 'admin-user',
-        jobId: 'job-1',
+        actor: adminUserFixture.id,
+        jobId: jobFixture.id,
         action: 'job.retry',
-        target: 'job-1',
-        resource: 'job-1',
+        target: jobFixture.id,
+        resource: jobFixture.id,
+      }),
+    );
+  });
+
+  it('should write an audit log entry when an admin retry attempt fails', async () => {
+    const retryMock = jest.fn().mockRejectedValue(new Error('retry failed'));
+    const getJobMock = jest.fn().mockResolvedValue({
+      ...jobFixture,
+      failedReason: 'failed',
+      retry: retryMock,
+    });
+    const closeMock = jest.fn().mockResolvedValue(undefined);
+    QueueMock.mockImplementation(() => ({
+      getJob: getJobMock,
+      close: closeMock,
+    }));
+
+    await expect(
+      retryFailedJobs(
+        {
+          queueName: 'test-queue',
+          limit: 1,
+          dryRun: false,
+          jobId: jobFixture.id,
+          actor: adminUserFixture.id,
+        },
+        mockLogger,
+      ),
+    ).rejects.toThrow();
+
+    expect(retryMock).toHaveBeenCalled();
+    expect(mockAuditLog).toHaveBeenCalledTimes(1);
+    expect(mockAuditLog).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actor: adminUserFixture.id,
+        jobId: jobFixture.id,
+        action: 'job.retry',
+        target: jobFixture.id,
+        resource: jobFixture.id,
       }),
     );
   });
@@ -136,21 +187,21 @@ describe('jobAdminService', () => {
   it('should not write an audit log entry when the retry fails validation', async () => {
     await expect(
       retryFailedJobs(
-        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: undefined, actor: 'admin-user' },
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: undefined, actor: adminUserFixture.id },
         mockLogger,
       ),
     ).rejects.toThrow();
 
     await expect(
       retryFailedJobs(
-        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: '', actor: 'admin-user' },
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: '', actor: adminUserFixture.id },
         mockLogger,
       ),
     ).rejects.toThrow();
 
     await expect(
       retryFailedJobs(
-        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 123 as any, actor: 'admin-user' },
+        { queueName: 'test-queue', limit: 1, dryRun: false, jobId: 123 as any, actor: adminUserFixture.id },
         mockLogger,
       ),
     ).rejects.toThrow(TypeError);

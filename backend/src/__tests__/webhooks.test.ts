@@ -49,6 +49,7 @@ import {
   MAX_ERROR_MESSAGE_LENGTH,
   TRUNCATION_MARKER,
 } from '../jobs/webhookRetryJob';
+import { makeOversizedWebhookError, OVERSIZED_WEBHOOK_ERROR } from './fixtures';
 
 beforeEach(() => jest.clearAllMocks());
 
@@ -330,6 +331,31 @@ describe('webhookRetryJob error truncation', () => {
     const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
     expect(stored).toBe(shortError);
     expect(stored.includes(TRUNCATION_MARKER)).toBe(false);
+  });
+
+  it('respects the documented truncation limit for an oversized retry error', async () => {
+    // Limit documented in WEBHOOK_ERROR_HANDLING_FIX.md
+    const DOCUMENTED_ERROR_LIMIT = 1000;
+
+    const oversizedError = makeOversizedWebhookError();
+    expect(oversizedError.message.length).toBeGreaterThan(DOCUMENTED_ERROR_LIMIT);
+    expect(oversizedError.message.startsWith(OVERSIZED_WEBHOOK_ERROR)).toBe(true);
+
+    mockFetch.mockRejectedValue(oversizedError);
+    mockUpdate.mockResolvedValue({});
+
+    await attemptDelivery('del-oversized-retry', url, secret, payload, 1);
+
+    expect(mockUpdate).toHaveBeenCalledTimes(1);
+    const stored = mockUpdate.mock.calls[0][0].data.errorMessage as string;
+
+    // Stored text must never exceed the documented limit
+    expect(stored.length).toBeLessThanOrEqual(DOCUMENTED_ERROR_LIMIT);
+    expect(stored.length).toBeLessThan(oversizedError.message.length);
+
+    // The leading portion of the original message must survive truncation
+    expect(stored.startsWith(OVERSIZED_WEBHOOK_ERROR)).toBe(true);
+    expect(stored.slice(0, OVERSIZED_WEBHOOK_ERROR.length)).toBe(OVERSIZED_WEBHOOK_ERROR);
   });
 });
 

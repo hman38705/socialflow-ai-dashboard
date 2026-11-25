@@ -259,6 +259,18 @@ describe('clearCache — pattern allowlist (issue #1757)', () => {
     expect(mockUnlink).not.toHaveBeenCalled();
   });
 
+  it('rejects a bare wildcard pattern before any Redis call is made', async () => {
+    // If the validation is removed, clearCache would proceed to SCAN and this
+    // assertion on the rejection would fail (the promise would resolve).
+    await expect(
+      clearCache({ pattern: '*', batchSize: 100 }, mockLogger),
+    ).rejects.toThrow(DisallowedCachePatternError);
+
+    expect(mockScan).not.toHaveBeenCalled();
+    expect(mockUnlink).not.toHaveBeenCalled();
+    expect(mockAuditLog).not.toHaveBeenCalled();
+  });
+
   it('accepts a scoped pattern and deletes the matched keys', async () => {
     mockScan.mockResolvedValueOnce(['0', ['cache:1', 'cache:2']]);
     mockUnlink.mockResolvedValueOnce(2);
@@ -268,6 +280,17 @@ describe('clearCache — pattern allowlist (issue #1757)', () => {
     expect(result.deletedKeys).toBe(2);
     expect(result.matchedKeys).toBe(2);
     expect(mockUnlink).toHaveBeenCalledWith('cache:1', 'cache:2');
+  });
+
+  it('accepts a scoped pattern and reaches Redis', async () => {
+    mockScan.mockResolvedValueOnce(['0', ['cache:1']]);
+    mockUnlink.mockResolvedValueOnce(1);
+
+    const result = await clearCache({ pattern: 'cache:*', batchSize: 100 }, mockLogger);
+
+    expect(mockScan).toHaveBeenCalledWith('0', 'MATCH', 'cache:*', 'COUNT', 100);
+    expect(mockUnlink).toHaveBeenCalledWith('cache:1');
+    expect(result.deletedKeys).toBe(1);
   });
 
   it('exposes isAllowedCachePattern consistent with the allowlist', () => {
