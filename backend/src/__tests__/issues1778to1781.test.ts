@@ -210,6 +210,80 @@ describe('#1961 SSE ticket map capacity', () => {
   });
 });
 
+describe('#1961 SSE ticket cap and sweep behaviour', () => {
+  beforeEach(() => {
+    jest.resetModules();
+  });
+
+  afterEach(() => {
+    jest.useRealTimers();
+    jest.restoreAllMocks();
+  });
+
+  it('keeps the map at or below the cap, evicting the oldest and retaining the newest', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    sseTicketService.clear();
+    const cap: number = sseTicketService.maxTickets;
+    expect(typeof cap).toBe('number');
+    expect(cap).toBeGreaterThan(0);
+
+    const issued: string[] = [];
+    for (let i = 0; i < cap * 2; i++) {
+      issued.push(sseTicketService.issue('user-' + i));
+      expect(sseTicketService.size).toBeLessThanOrEqual(cap);
+    }
+
+    expect(sseTicketService.size).toBe(cap);
+    // Oldest tickets were evicted.
+    expect(sseTicketService.consume(issued[0])).toBeUndefined();
+    // Newest ticket is still live.
+    expect(sseTicketService.consume(issued[issued.length - 1])).toBeDefined();
+  });
+
+  it('sweeps expired tickets without waiting for a consume lookup', () => {
+    jest.useFakeTimers();
+    const { sseTicketService } = require('../services/SSETicketService');
+    sseTicketService.clear();
+    const ttl: number = sseTicketService.ttlMs;
+
+    sseTicketService.issue('user-1');
+    sseTicketService.issue('user-2');
+    const tickets = (sseTicketService as any).tickets as Map<string, unknown>;
+    expect(tickets.size).toBe(2);
+
+    jest.advanceTimersByTime(ttl + 1);
+    sseTicketService.sweep();
+
+    expect(tickets.size).toBe(0);
+    expect(sseTicketService.size).toBe(0);
+  });
+
+  it('updates the sseTicketsActive gauge to reflect the live ticket count', () => {
+    jest.useFakeTimers();
+    const metrics = require('../lib/metrics');
+    const { sseTicketService } = require('../services/SSETicketService');
+    sseTicketService.clear();
+
+    const gauge = metrics.sseTicketsActive;
+    expect(gauge).toBeDefined();
+
+    sseTicketService.issue('user-1');
+    sseTicketService.issue('user-2');
+    expect(sseTicketService.size).toBe(2);
+    if (typeof gauge?.set === 'function') {
+      expect(gauge.set).toHaveBeenLastCalledWith(2);
+    }
+
+    jest.advanceTimersByTime(sseTicketService.ttlMs + 1);
+    sseTicketService.sweep();
+    expect(sseTicketService.size).toBe(0);
+    if (typeof gauge?.set === 'function') {
+      expect(gauge.set).toHaveBeenLastCalledWith(0);
+    }
+  });
+});
+
 describe('#2046 SSE ticket sweep interval teardown', () => {
   afterEach(() => {
     jest.useRealTimers();

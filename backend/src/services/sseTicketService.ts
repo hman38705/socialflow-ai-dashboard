@@ -1,4 +1,6 @@
 import { randomBytes } from 'crypto';
+import { config } from '../config/config';
+import { setGauge } from '../lib/metrics';
 
 /**
  * SSE ticket service.
@@ -17,16 +19,31 @@ export interface SseTicket {
 
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_SWEEP_INTERVAL_MS = 10_000;
+const DEFAULT_MAX_TICKETS = 10_000;
+
+function resolveMaxTickets(): number {
+  const configured = (config as { sseMaxTickets?: number }).sseMaxTickets;
+  if (typeof configured === 'number' && Number.isFinite(configured) && configured > 0) {
+    return Math.floor(configured);
+  }
+  return DEFAULT_MAX_TICKETS;
+}
 
 export class SseTicketService {
   private readonly tickets = new Map<string, SseTicket>();
-  private readonly ttlMs: number;
-  private readonly sweepIntervalMs: number;
+  readonly ttlMs: number;
+  readonly sweepIntervalMs: number;
+  readonly maxTickets: number;
   private sweepInterval: NodeJS.Timeout | undefined;
 
-  constructor(ttlMs: number = DEFAULT_TTL_MS, sweepIntervalMs: number = DEFAULT_SWEEP_INTERVAL_MS) {
+  constructor(
+    ttlMs: number = DEFAULT_TTL_MS,
+    sweepIntervalMs: number = DEFAULT_SWEEP_INTERVAL_MS,
+    maxTickets: number = resolveMaxTickets(),
+  ) {
     this.ttlMs = ttlMs;
     this.sweepIntervalMs = sweepIntervalMs;
+    this.maxTickets = maxTickets > 0 ? Math.floor(maxTickets) : DEFAULT_MAX_TICKETS;
     this.start();
   }
 
@@ -50,12 +67,23 @@ export class SseTicketService {
 =======
 
   issue(userId: string): string {
+    // Drop dead entries first so they never count against the cap.
+    this.sweep();
+    // Evict oldest entries (Map preserves insertion order) until there is room.
+    while (this.tickets.size >= this.maxTickets) {
+      const oldest = this.tickets.keys().next();
+      if (oldest.done) {
+        break;
+      }
+      this.tickets.delete(oldest.value);
+    }
     const ticket = randomBytes(24).toString('hex');
     this.tickets.set(ticket, {
       ticket,
       userId,
       expiresAt: Date.now() + this.ttlMs,
     });
+    this.updateGauge();
     return ticket;
   }
 
@@ -65,6 +93,7 @@ export class SseTicketService {
       return undefined;
     }
     this.tickets.delete(ticket);
+    this.updateGauge();
     if (entry.expiresAt <= Date.now()) {
       return undefined;
     }
@@ -78,6 +107,16 @@ export class SseTicketService {
         this.tickets.delete(ticket);
       }
     }
+    this.updateGauge();
+  }
+
+  /** Current number of live tickets held in the map. */
+  size(): number {
+    return this.tickets.size;
+  }
+
+  private updateGauge(): void {
+    setGauge('sseTicketsActive', this.tickets.size);
   }
 
   stop(): void {

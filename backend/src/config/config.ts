@@ -230,6 +230,12 @@ const envSchema = z
 
     // ── AWS S3 ────────────────────────────────────────────────────────────────
     S3_PRESIGNED_URL_EXPIRY_SECONDS: z.coerce.number().int().positive().default(3600),
+
+    // ── SSE Tickets ───────────────────────────────────────────────────────────
+    // Maximum number of live SSE tickets held in-process. When the cap is
+    // reached, the oldest tickets are evicted so a client looping the ticket
+    // endpoint cannot grow the map without bound.
+    SSE_TICKET_MAX: z.coerce.number().int().positive().default(10000),
   })
   .superRefine((data, ctx) => {
     if (data.NODE_ENV === 'production' && data.ELASTICSEARCH_TLS_REJECT_UNAUTHORIZED === 'false') {
