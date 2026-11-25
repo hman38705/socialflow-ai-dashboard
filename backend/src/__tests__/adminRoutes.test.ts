@@ -746,6 +746,159 @@ describe('Admin limit parameter validation (#2063)', () => {
   });
 });
 
+describe('Admin numeric and flag parameter validation (#1962)', () => {
+  beforeEach(() => {
+    RoleStore.assign('admin-user', 'admin');
+    jest.clearAllMocks();
+  });
+
+  describe('limit', () => {
+    it.each([
+      { label: 'non-numeric', limit: 'abc' },
+      { label: 'negative', limit: -1 },
+      { label: 'oversized', limit: MAX_ADMIN_LIMIT + 1 },
+    ])(
+      'rejects $label limit on GET /admin/jobs/queues with 400',
+      async ({ limit }) => {
+        const res = await request(app)
+          .get('/admin/jobs/queues')
+          .query({ limit })
+          .set('x-test-user-id', 'admin-user');
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(jobAdminService.getDiscoveredQueueNames).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a valid limit on GET /admin/jobs/queues', async () => {
+      const res = await request(app)
+        .get('/admin/jobs/queues')
+        .query({ limit: 10 })
+        .set('x-test-user-id', 'admin-user');
+      expect(res.status).toBe(200);
+      expect(jobAdminService.getDiscoveredQueueNames).toHaveBeenCalled();
+    });
+  });
+
+  describe('batchSize', () => {
+    it.each([
+      { label: 'non-numeric', batchSize: 'abc' },
+      { label: 'negative', batchSize: -1 },
+      { label: 'oversized', batchSize: MAX_BATCH_SIZE + 1 },
+    ])(
+      'rejects $label batchSize on POST /admin/jobs/retry with 400',
+      async ({ batchSize }) => {
+        const res = await request(app)
+          .post('/admin/jobs/retry')
+          .set('x-test-user-id', 'admin-user')
+          .send({ batchSize });
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(retryFailedJobs).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      { label: 'non-numeric', batchSize: 'abc' },
+      { label: 'negative', batchSize: -1 },
+      { label: 'oversized', batchSize: MAX_BATCH_SIZE + 1 },
+    ])(
+      'rejects $label batchSize on POST /admin/cache/clear with 400',
+      async ({ batchSize }) => {
+        const res = await request(app)
+          .post('/admin/cache/clear')
+          .set('x-test-user-id', 'admin-user')
+          .send({ pattern: 'user:*', batchSize });
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(clearCache).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a valid batchSize on POST /admin/jobs/retry', async () => {
+      const res = await request(app)
+        .post('/admin/jobs/retry')
+        .set('x-test-user-id', 'admin-user')
+        .send({ batchSize: 10 });
+      expect(res.status).toBe(200);
+      expect(retryFailedJobs).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('dryRun', () => {
+    it.each([
+      { label: 'non-numeric string', dryRun: 'yes' },
+      { label: 'number', dryRun: 1 },
+      { label: 'negative number', dryRun: -1 },
+    ])(
+      'rejects $label dryRun on POST /admin/migrations/run with 400',
+      async ({ dryRun }) => {
+        const res = await request(app)
+          .post('/admin/migrations/run')
+          .set('x-test-user-id', 'admin-user')
+          .send({ force: true, dryRun });
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(runMigrations).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a valid boolean dryRun on POST /admin/migrations/run', async () => {
+      const res = await request(app)
+        .post('/admin/migrations/run')
+        .set('x-test-user-id', 'admin-user')
+        .send({ force: true, dryRun: true });
+      expect(res.status).toBe(200);
+      expect(runMigrations).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe('force', () => {
+    it.each([
+      { label: 'non-numeric string', force: 'false' },
+      { label: 'number', force: 1 },
+      { label: 'negative number', force: -1 },
+    ])(
+      'rejects $label force on POST /admin/migrations/run with 400',
+      async ({ force }) => {
+        const res = await request(app)
+          .post('/admin/migrations/run')
+          .set('x-test-user-id', 'admin-user')
+          .send({ force });
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(runMigrations).not.toHaveBeenCalled();
+      },
+    );
+
+    it.each([
+      { label: 'non-numeric string', force: 'false' },
+      { label: 'number', force: 1 },
+      { label: 'negative number', force: -1 },
+    ])(
+      'rejects $label force on POST /admin/migrations/test/rollback with 400',
+      async ({ force }) => {
+        const res = await request(app)
+          .post('/admin/migrations/test/rollback')
+          .set('x-test-user-id', 'admin-user')
+          .send({ force });
+        expect(res.status).toBe(400);
+        expectErrorShape(res.body);
+        expect(rollbackMigration).not.toHaveBeenCalled();
+      },
+    );
+
+    it('accepts a valid boolean force on POST /admin/migrations/run', async () => {
+      const res = await request(app)
+        .post('/admin/migrations/run')
+        .set('x-test-user-id', 'admin-user')
+        .send({ force: true });
+      expect(res.status).toBe(200);
+      expect(runMigrations).toHaveBeenCalledTimes(1);
+    });
+  });
+});
+
 describe('SSE ticket map size cap eviction (#2064)', () => {
   beforeEach(() => {
     jest.useFakeTimers();

@@ -1,10 +1,10 @@
 # Data Retention and Pruning Policy
 
-This document is the source of truth for retention behavior in the backend.
+This document describes retention behavior in the backend. The authoritative definition of every retention variable, its default and its allowed values is the Zod schema in [`backend/src/config/config.ts`](../src/config/config.ts); if this document and the schema ever disagree, the schema wins and this document should be corrected.
 
 ## Scope and ownership
 
-- Runtime config source: `backend/src/config/config.ts`
+- Runtime config source (authoritative): `backend/src/config/config.ts`
 - Retention config assembly: `backend/src/config/runtime.ts`
 - Pruning engine: `backend/src/retention/dataPruningService.ts`
 - Scheduler job: `backend/src/jobs/dataPruningJob.ts`
@@ -27,14 +27,14 @@ Notes:
 
 ## Missing path policy
 
-When a configured retention path does not exist, the pruning run consults `DATA_RETENTION_MISSING_PATH_POLICY`. The variable names and defaults below match the optional-variables table in the repository `README.md`; keep the two in sync when changing either.
+When a configured retention path does not exist, the pruning run consults `DATA_RETENTION_MISSING_PATH_POLICY`. The variable names, defaults and allowed values below are taken from the schema in `backend/src/config/config.ts`; keep this table in sync with that file when changing either.
 
-| Variable                                      | Default | Allowed values          |
-| --------------------------------------------- | ------- | ----------------------- |
+| Variable                                      | Default | Allowed values           |
+| --------------------------------------------- | ------- | ------------------------ |
 | `DATA_RETENTION_MISSING_PATH_POLICY`          | `warn`  | `warn`, `fail`, `ignore` |
-| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`     | positive integer        |
+| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`     | positive integer         |
 
-The modes documented here (`warn`, `fail`, `ignore`) are the source of truth for runtime behavior. The Kubernetes CronJob manifest at [`k8s/base/data-pruning-cronjob.yaml`](../../k8s/base/data-pruning-cronjob.yaml) is the deployment reference for the scheduled job; note that it currently lists `skip`/`prune` values that differ from the documented modes. Treat this document and the `README.md` defaults as authoritative, and do not infer behavior from the manifest's values.
+The modes documented here (`warn`, `fail`, `ignore`) are the values accepted by the schema. The Kubernetes CronJob manifest at [`k8s/base/data-pruning-cronjob.yaml`](../../k8s/base/data-pruning-cronjob.yaml) is the deployment reference for the scheduled job; note that it currently lists `skip`/`prune` values that differ from the documented modes. Treat `backend/src/config/config.ts` as authoritative, and do not infer behavior from the manifest's values.
 
 ### Mode semantics
 
@@ -70,14 +70,22 @@ The modes documented here (`warn`, `fail`, `ignore`) are the source of truth for
 
 ## Operational behavior
 
+The scheduler and mode variables below are defined in `backend/src/config/config.ts`; the defaults and allowed values listed here mirror that schema.
+
+| Variable                    | Default        | Allowed values / notes                                        |
+| --------------------------- | -------------- | ------------------------------------------------------------- |
+| `DATA_PRUNING_ENABLED`      | `true`         | boolean; when `false` the scheduler is not started            |
+| `DATA_PRUNING_CRON`         | `0 2 * * *`    | cron expression (daily at 02:00 in server local timezone)     |
+| `DATA_PRUNING_QUEUE`        | `data-pruning` | non-empty string; BullMQ queue name                           |
+| `DATA_RETENTION_MODE`       | `archive`      | `archive`, `delete`                                           |
+| `DATA_RETENTION_ARCHIVE_DIR`| `archive`      | non-empty string; archive root used in `archive` mode         |
+
 - Scheduler start: automatic when backend boots (`startDataPruningJob()` in server bootstrap).
 - Scheduler gating: if `DATA_PRUNING_ENABLED=false`, scheduler is not started.
-- Default cron: `DATA_PRUNING_CRON=0 2 * * *` (daily at 02:00 in server local timezone).
-- Queue: BullMQ queue name defaults to `data-pruning` (`DATA_PRUNING_QUEUE`).
 
 ## Mode semantics
 
-`DATA_RETENTION_MODE` supports `archive` and `delete`.
+`DATA_RETENTION_MODE` supports `archive` and `delete` (the only values accepted by the schema).
 
 ### `archive` mode (default)
 
@@ -183,3 +191,21 @@ Recommended steps:
 4. Run one manual pruning cycle and inspect summary.
 5. Confirm archive storage capacity and lifecycle policy.
 6. Enable scheduler and monitor first scheduled execution logs.
+
+## Configuration reference
+
+The table below lists every retention and pruning variable with the default and allowed values defined in `backend/src/config/config.ts`. Update this table whenever the schema changes.
+
+| Variable                                      | Default          | Allowed values / notes                                  |
+| --------------------------------------------- | ---------------- | ------------------------------------------------------- |
+| `DATA_RETENTION_MODE`                         | `archive`        | `archive`, `delete`                                     |
+| `DATA_RETENTION_ARCHIVE_DIR`                  | `archive`        | non-empty string                                        |
+| `DATA_RETENTION_LOG_DAYS`                     | `30`             | positive integer (days)                                 |
+| `DATA_RETENTION_LOG_PATHS`                    | `logs`           | comma-separated path list                               |
+| `DATA_RETENTION_ANALYTICS_DAYS`               | `90`             | positive integer (days)                                 |
+| `DATA_RETENTION_ANALYTICS_PATHS`              | `data/analytics` | comma-separated path list                               |
+| `DATA_RETENTION_MISSING_PATH_POLICY`          | `warn`           | `warn`, `fail`, `ignore`                                |
+| `DATA_RETENTION_MISSING_PATH_ALERT_THRESHOLD` | `3`              | positive integer                                        |
+| `DATA_PRUNING_ENABLED`                        | `true`           | boolean                                                 |
+| `DATA_PRUNING_CRON`                           | `0 2 * * *`      | cron expression                                         |
+| `DATA_PRUNING_QUEUE`                          | `data-pruning`   | non-empty string                                        |
